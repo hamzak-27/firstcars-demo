@@ -18,27 +18,16 @@ except ImportError:
     st.error("python-dotenv not installed. Install with: pip install python-dotenv")
 
 from car_rental_ai_agent import CarRentalAIAgent, BookingExtraction
+from google_sheets_integration import sheets_manager
 from datetime import datetime, timedelta
 
-# Excel file configuration
-EXCEL_FILE = "booking_extractions.xlsx"
-EXCEL_COLUMNS = [
-    "Corporate", "Booked By Name", "Booked By Phone", "Booked By Email",
-    "Passenger Name", "Passenger Phone", "Passenger Email",
-    "From Location", "To Location", "Vehicle Group", "Duty Type",
-    "Start Date", "End Date", "Reporting Time", "Drop Time",
-    "Start From Garage", "Reporting Address", "Drop Address",
-    "Flight/Train Number", "Dispatch Center", "Bill To", "Price",
-    "Remarks", "Labels"
-]
+# Google Sheets configuration
+GOOGLE_SHEETS_URL = "https://docs.google.com/spreadsheets/d/1zz1xkvI0-XCkU23eBfSW9jSLK--UfCU94iT-poEkf_E/edit#gid=0"
 
-def initialize_excel_file():
-    """Initialize Excel file with headers if it doesn't exist"""
-    if not os.path.exists(EXCEL_FILE):
-        df = pd.DataFrame(columns=EXCEL_COLUMNS)
-        df.to_excel(EXCEL_FILE, index=False)
-        return True
-    return False
+def test_google_sheets_connection():
+    """Test Google Sheets connection and show status"""
+    success, message = sheets_manager.test_connection()
+    return success, message
 
 def create_multiple_bookings_if_needed(booking):
     """Create multiple booking entries if the request spans multiple dates"""
@@ -97,62 +86,22 @@ def create_multiple_bookings_if_needed(booking):
         # If date parsing fails, return original booking
         return [booking]
 
-def save_to_excel(booking_data):
-    """Save booking data to Excel file"""
-    import time
-    max_retries = 3
-    
-    for attempt in range(max_retries):
-        try:
-            # Read existing data
-            try:
-                df = pd.read_excel(EXCEL_FILE)
-            except FileNotFoundError:
-                df = pd.DataFrame(columns=EXCEL_COLUMNS)
+def save_to_google_sheets(booking_data):
+    """Save booking data to Google Sheets"""
+    try:
+        # Check if this booking spans multiple dates
+        bookings_to_save = create_multiple_bookings_if_needed(booking_data)
+        
+        # Save to Google Sheets
+        success, message, total_rows = sheets_manager.append_booking_data(bookings_to_save)
+        
+        if success:
+            return True, (total_rows, len(bookings_to_save))
+        else:
+            return False, message
             
-            # Check if this booking spans multiple dates
-            bookings_to_save = create_multiple_bookings_if_needed(booking_data)
-            
-            # Create rows for all bookings
-            new_rows = []
-            for booking in bookings_to_save:
-                # Convert booking data to row format
-                row_data = booking.to_sheets_row()
-                
-                # Create new row dictionary
-                new_row = {}
-                for i, col in enumerate(EXCEL_COLUMNS):
-                    if i < len(row_data):
-                        new_row[col] = row_data[i] if row_data[i] else ""
-                    else:
-                        new_row[col] = ""
-                
-                new_rows.append(new_row)
-            
-            # Create DataFrame from new rows
-            new_rows_df = pd.DataFrame(new_rows)
-            
-            # Append to existing data
-            df = pd.concat([df, new_rows_df], ignore_index=True)
-            
-            # Save to Excel with retry mechanism
-            df.to_excel(EXCEL_FILE, index=False)
-            return True, (len(df), len(bookings_to_save))
-            
-        except PermissionError as e:
-            if attempt < max_retries - 1:
-                st.warning(f"⚠️ Excel file is open in another program. Retrying in {attempt + 1} seconds...")
-                time.sleep(attempt + 1)  # Progressive delay
-                continue
-            else:
-                return False, f"Permission denied. Please close the Excel file '{EXCEL_FILE}' and try again."
-        except Exception as e:
-            if attempt < max_retries - 1:
-                time.sleep(0.5)
-                continue
-            return False, str(e)
-    
-    return False, "Failed after multiple retries"
+    except Exception as e:
+        return False, f"Failed to save to Google Sheets: {str(e)}"
 
 def display_extracted_data(booking):
     """Display extracted data in a clean format"""
@@ -220,9 +169,17 @@ def main():
     st.title("🚗 FirstCars Demo Tool")
     st.markdown("---")
     
-    # Initialize Excel file
-    if initialize_excel_file():
-        st.success(f"✅ Initialized new Excel file: {EXCEL_FILE}")
+    # Test Google Sheets connection
+    with st.spinner("Connecting to Google Sheets..."):
+        sheets_success, sheets_message = test_google_sheets_connection()
+    
+    if sheets_success:
+        st.success(f"✅ {sheets_message}")
+        # Initialize headers in Google Sheets if needed
+        sheets_manager.initialize_headers()
+    else:
+        st.error(f"❌ Google Sheets connection failed: {sheets_message}")
+        st.info("📝 Please ensure Google Service Account credentials are configured in Streamlit secrets.")
     
     # Check for API key (from secrets or environment)
     api_key = None
@@ -302,13 +259,17 @@ def main():
             # Save to Excel button
             st.markdown("---")
             if num_bookings > 1:
-                st.info(f"📅 This booking spans {num_bookings} days and will create {num_bookings} separate Excel rows.")
-                button_text = f"💾 Save {num_bookings} Bookings to Excel"
+                st.info(f"📅 This booking spans {num_bookings} days and will create {num_bookings} separate Google Sheets rows.")
+                button_text = f"💾 Save {num_bookings} Bookings to Google Sheets"
             else:
-                button_text = "💾 Save to Excel"
+                button_text = "💾 Save to Google Sheets"
             
             if st.button(button_text, type="secondary", use_container_width=True):
-                success, result = save_to_excel(st.session_state.booking_data)
+                if not sheets_success:
+                    st.error("❌ Cannot save: Google Sheets connection failed. Please check your credentials.")
+                else:
+                    with st.spinner("Saving to Google Sheets..."):
+                        success, result = save_to_google_sheets(st.session_state.booking_data)
                 if success:
                     total_records, bookings_added = result
                     if bookings_added > 1:
@@ -321,32 +282,30 @@ def main():
         elif not st.session_state.extraction_done:
             st.info("👈 Enter email content and click 'Extract Data' to see results here.")
     
-    # Footer with file info
+    # Footer with Google Sheets info
     st.markdown("---")
     col_info1, col_info2, col_info3 = st.columns(3)
     
-    with col_info1:
-        if os.path.exists(EXCEL_FILE):
-            df = pd.read_excel(EXCEL_FILE)
-            st.metric("📁 Total Records", len(df))
-    
-    with col_info2:
-        if os.path.exists(EXCEL_FILE):
-            file_size = os.path.getsize(EXCEL_FILE)
-            st.metric("📊 File Size", f"{file_size / 1024:.1f} KB")
-    
-    with col_info3:
-        st.markdown(f"**💾 Excel File:** `{EXCEL_FILE}`")
-    
-    # Download Excel file option
-    if os.path.exists(EXCEL_FILE):
-        with open(EXCEL_FILE, "rb") as file:
-            st.download_button(
-                label="📥 Download Excel File",
-                data=file.read(),
-                file_name=EXCEL_FILE,
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
+    # Get Google Sheets information
+    if sheets_success:
+        sheet_info = sheets_manager.get_sheet_info()
+        if sheet_info:
+            with col_info1:
+                st.metric("📁 Total Records", sheet_info["total_rows"])
+            
+            with col_info2:
+                st.metric("📈 Sheet Title", sheet_info["sheet_title"])
+            
+            with col_info3:
+                st.markdown(f"**📝 Worksheet:** {sheet_info['worksheet_title']}")
+            
+            # Link to open Google Sheets
+            st.markdown(f"### 🔗 [Open Google Sheets]({GOOGLE_SHEETS_URL})")
+        else:
+            st.warning("⚠️ Could not retrieve Google Sheets information")
+    else:
+        with col_info2:
+            st.error("❌ Google Sheets not connected")
 
 if __name__ == "__main__":
     main()
