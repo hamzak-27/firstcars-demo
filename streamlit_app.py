@@ -24,7 +24,13 @@ except ImportError:
 
 # Import our enhanced processors
 from unified_email_processor import UnifiedEmailProcessor
-from document_processor import DocumentProcessor
+try:
+    from practical_document_processor import PracticalDocumentProcessor as DocumentProcessor
+except ImportError:
+    try:
+        from enhanced_document_processor import EnhancedDocumentProcessor as DocumentProcessor
+    except ImportError:
+        from document_processor import DocumentProcessor
 from structured_email_agent import StructuredExtractionResult
 from car_rental_ai_agent import BookingExtraction
 from google_sheets_integration import sheets_manager
@@ -277,7 +283,16 @@ def main():
     
     # Initialize processors
     unified_processor = UnifiedEmailProcessor(api_key)
-    document_processor = DocumentProcessor(openai_api_key=api_key)
+    
+    # Initialize document processor with AWS region preference
+    aws_region = os.getenv('AWS_DEFAULT_REGION', 'us-east-1')
+    document_processor = DocumentProcessor(aws_region=aws_region, openai_api_key=api_key)
+    
+    # Check OCR capabilities
+    if hasattr(document_processor, 'textract_available') and document_processor.textract_available:
+        st.success("🚀 Enhanced OCR processing with AWS Textract is available! Supports tables, forms, and structured data extraction.")
+    else:
+        st.warning("⚠️ AWS Textract not available. Using fallback text extraction for PDFs and Word docs. Images/screenshots require AWS Textract.")
 
     # Tabs for different workflows
     tab1, tab2, tab3, tab4 = st.tabs(["Email Text", "Email Screenshots", "Documents", "Email + Attachments"])
