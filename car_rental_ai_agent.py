@@ -155,7 +155,7 @@ class CarRentalAIAgent:
     
     def extract_booking_data(self, email_content: str, sender_email: str = None) -> BookingExtraction:
         """
-        Main method to extract booking data from email content
+        Main method to extract booking data from email content (single booking - for backward compatibility)
         
         Args:
             email_content: Raw email text content
@@ -164,20 +164,20 @@ class CarRentalAIAgent:
         Returns:
             BookingExtraction object with extracted data and confidence score
         """
-        logger.info("Starting booking data extraction")
+        logger.info("Starting single booking data extraction")
         
         try:
-            # Use GPT-4o with chain-of-thought reasoning
-            extraction_result = self._extract_with_chain_of_thought(email_content, sender_email)
+            # Use the new multi-booking method and return the first booking
+            multiple_results = self.extract_multiple_bookings(email_content, sender_email)
             
-            # Post-process and validate the data
-            processed_data = self._post_process_extraction(extraction_result)
-            
-            # Create BookingExtraction object
-            booking = BookingExtraction(**processed_data)
-            
-            logger.info(f"Extraction completed with confidence: {booking.confidence_score}")
-            return booking
+            if multiple_results and len(multiple_results) > 0:
+                return multiple_results[0]
+            else:
+                # Return empty extraction
+                return BookingExtraction(
+                    remarks="No bookings found",
+                    confidence_score=0.0
+                )
             
         except Exception as e:
             logger.error(f"Extraction failed: {str(e)}")
@@ -187,8 +187,147 @@ class CarRentalAIAgent:
                 confidence_score=0.0
             )
     
+    def extract_multiple_bookings(self, email_content: str, sender_email: str = None) -> List[BookingExtraction]:
+        """
+        Enhanced method to extract multiple booking data from email content
+        
+        Args:
+            email_content: Raw email text content
+            sender_email: Sender's email address (optional)
+            
+        Returns:
+            List of BookingExtraction objects with extracted data
+        """
+        logger.info("Starting multiple booking data extraction")
+        
+        try:
+            # Use GPT-4o with enhanced reasoning for multiple bookings
+            extraction_result = self._extract_multiple_with_reasoning(email_content, sender_email)
+            
+            # Process multiple bookings
+            bookings = self._process_multiple_extractions(extraction_result)
+            
+            logger.info(f"Multiple extraction completed. Found {len(bookings)} booking(s)")
+            return bookings
+            
+        except Exception as e:
+            logger.error(f"Multiple extraction failed: {str(e)}")
+            # Return empty list
+            return []
+    
+    def _extract_multiple_with_reasoning(self, email_content: str, sender_email: str = None) -> Dict:
+        """Use GPT-4o to extract multiple bookings from unstructured email content"""
+        
+        # Get current date for relative date processing
+        current_date = datetime.now()
+        current_date_str = current_date.strftime('%Y-%m-%d')
+        current_day_name = current_date.strftime('%A')
+        
+        system_prompt = f"""You are an expert AI agent specialized in extracting car rental booking information from unstructured emails. You must identify ALL separate bookings mentioned in the email content.
+
+IMPORTANT RULES:
+1. Analyze the email for MULTIPLE bookings - each booking should be a separate record
+2. Different dates = different bookings (even same passenger)
+3. Different passengers = different bookings (even same date)
+4. Different pickup/drop locations = different bookings
+5. Handle relative dates like "tomorrow", "next Monday", "today" using current date: {current_date_str} ({current_day_name})
+6. Normalize vehicle names and locations using provided mappings
+7. Convert all dates to YYYY-MM-DD format
+8. Convert times to HH:MM 24-hour format
+
+DATE CONVERSION REFERENCE (Today is {current_date_str}, {current_day_name}):
+- "today" = {current_date_str}
+- "tomorrow" = {(current_date + timedelta(days=1)).strftime('%Y-%m-%d')}
+- "day after tomorrow" = {(current_date + timedelta(days=2)).strftime('%Y-%m-%d')}
+- "next Monday" = next occurrence of that weekday
+- "this Friday" = this week's Friday if not past, otherwise next week
+
+VEHICLE STANDARDIZATION:
+- Dzire/Desire → Swift Dzire
+- Crysta → Toyota Innova Crysta
+- Etios → Toyota Etios
+- Innova → Toyota Innova
+- AC Cab → AC Sedan
+- Tempo Traveller → Tempo Traveller"""
+        
+        user_prompt = f"""
+Please analyze this car rental email and extract ALL separate bookings. Look carefully for:
+- Multiple dates mentioned
+- Multiple passengers
+- Multiple trips/routes
+- Different pickup times
+- Round trips vs one-way trips
+
+EMAIL CONTENT:
+{email_content}
+
+SENDER EMAIL: {sender_email or 'Not provided'}
+
+CURRENT DATE: {current_date_str} ({current_day_name})
+
+Please provide your analysis in this EXACT JSON format:
+{{
+    "analysis": "Step-by-step analysis explaining how many separate bookings you identified and why",
+    "bookings_count": 2,
+    "bookings": [
+        {{
+            "booking_number": 1,
+            "corporate": "company name or null",
+            "booked_by_name": "booker name or null",
+            "booked_by_phone": "booker phone or null", 
+            "booked_by_email": "booker email or null",
+            "passenger_name": "passenger name or null",
+            "passenger_phone": "passenger phone (10 digits) or null",
+            "passenger_email": "passenger email or null",
+            "from_location": "source location or null",
+            "to_location": "destination location or null", 
+            "vehicle_group": "standardized vehicle name or null",
+            "duty_type": "duty type or null",
+            "start_date": "YYYY-MM-DD format (convert relative dates) or null",
+            "end_date": "YYYY-MM-DD format or null",
+            "reporting_time": "HH:MM format or null",
+            "start_from_garage": "garage info or null",
+            "reporting_address": "complete pickup address or null",
+            "drop_address": "complete drop address or null",
+            "flight_train_number": "flight/train number or null",
+            "dispatch_center": "dispatch info or null",
+            "bill_to": "billing entity or null",
+            "price": "price info or null",
+            "remarks": "special instructions/notes or null",
+            "labels": "any labels or null",
+            "additional_info": "any other relevant information or null"
+        }}
+        // ... additional bookings if found
+    ],
+    "confidence_score": 0.85,
+    "processing_notes": "Notes about extraction process and any assumptions made"
+}}
+
+Return ONLY valid JSON, no additional text."""
+        
+        try:
+            response = self.client.chat.completions.create(
+                model="gpt-4o",
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                temperature=0.1,
+                max_tokens=4000
+            )
+            
+            # Extract and parse JSON response
+            ai_response = response.choices[0].message.content.strip()
+            json_data = self._parse_json_response(ai_response)
+            
+            return json_data
+            
+        except Exception as e:
+            logger.error(f"Multiple booking GPT-4o extraction failed: {str(e)}")
+            raise
+    
     def _extract_with_chain_of_thought(self, email_content: str, sender_email: str = None) -> Dict:
-        """Use GPT-4o with chain-of-thought reasoning for extraction"""
+        """Use GPT-4o with chain-of-thought reasoning for extraction (legacy method)"""
         
         # Create comprehensive prompt with examples and reasoning
         system_prompt = """You are an expert AI agent specialized in extracting car rental booking information from unstructured emails. You must think step-by-step and provide detailed reasoning for your extractions.
@@ -321,6 +460,73 @@ Return ONLY valid JSON, no additional text."""
             logger.error(f"Response was: {response[:500]}...")
             raise ValueError(f"Invalid JSON in AI response: {str(e)}")
     
+    def _process_multiple_extractions(self, raw_data: Dict) -> List[BookingExtraction]:
+        """Process multiple extraction results into BookingExtraction objects"""
+        
+        bookings = []
+        
+        if 'bookings' not in raw_data:
+            logger.warning("No 'bookings' key found in extraction result")
+            return bookings
+        
+        for i, booking_data in enumerate(raw_data['bookings']):
+            try:
+                # Remove booking_number if present
+                booking_data.pop('booking_number', None)
+                
+                # Process each field with validation and normalization
+                processed_data = self._post_process_single_booking(booking_data)
+                
+                # Add metadata from the overall extraction
+                processed_data['confidence_score'] = raw_data.get('confidence_score', 0.5)
+                processed_data['extraction_reasoning'] = raw_data.get('analysis', '')
+                
+                # Create BookingExtraction object
+                booking = BookingExtraction(**processed_data)
+                bookings.append(booking)
+                
+            except Exception as e:
+                logger.warning(f"Failed to process booking {i+1}: {str(e)}")
+                continue
+        
+        return bookings
+    
+    def _post_process_single_booking(self, booking_data: Dict) -> Dict:
+        """Post-process a single booking's data"""
+        processed = {}
+        
+        # Process each field with validation and normalization
+        for field, value in booking_data.items():
+            if value is None or (isinstance(value, str) and value.lower() in ['null', 'none', 'not provided', '']):
+                processed[field] = None
+            elif isinstance(value, str):
+                value = value.strip()
+                
+                # Field-specific processing
+                if field == 'vehicle_group':
+                    processed[field] = self._map_vehicle_type(value)
+                elif field in ['from_location', 'to_location']:
+                    processed[field] = self._map_city_name(value)
+                elif field in ['booked_by_phone', 'passenger_phone']:
+                    processed[field] = self._clean_phone_number(value)
+                elif field in ['start_date', 'end_date']:
+                    processed[field] = self._normalize_date_with_relative(value)
+                elif field == 'reporting_time':
+                    normalized_time = self._normalize_time(value)
+                    processed[field] = self._round_time_to_15_minutes(normalized_time)
+                else:
+                    processed[field] = value if value else None
+            else:
+                processed[field] = value
+        
+        # Auto-fill end_date if not provided (assume same day for single trips)
+        if processed.get('start_date') and not processed.get('end_date'):
+            remarks = processed.get('remarks') or ''
+            if 'round trip' not in remarks.lower():
+                processed['end_date'] = processed['start_date']
+        
+        return processed
+    
     def _post_process_extraction(self, raw_data: Dict) -> Dict:
         """Post-process and validate extracted data"""
         
@@ -404,8 +610,70 @@ Return ONLY valid JSON, no additional text."""
         # Return original if can't standardize
         return phone
     
+    def _normalize_date_with_relative(self, date_str: str) -> str:
+        """Convert various date formats including relative dates to YYYY-MM-DD"""
+        if not date_str:
+            return None
+            
+        date_str = date_str.strip().lower()
+        current_date = datetime.now()
+        current_year = current_date.year
+        
+        # Handle relative dates first
+        if 'today' in date_str:
+            return current_date.strftime('%Y-%m-%d')
+        elif 'tomorrow' in date_str:
+            tomorrow = current_date + timedelta(days=1)
+            return tomorrow.strftime('%Y-%m-%d')
+        elif 'day after tomorrow' in date_str:
+            day_after = current_date + timedelta(days=2)
+            return day_after.strftime('%Y-%m-%d')
+        elif 'yesterday' in date_str:
+            yesterday = current_date - timedelta(days=1)
+            return yesterday.strftime('%Y-%m-%d')
+        
+        # Handle "next [weekday]" or "this [weekday]"
+        weekdays = {
+            'monday': 0, 'tuesday': 1, 'wednesday': 2, 'thursday': 3,
+            'friday': 4, 'saturday': 5, 'sunday': 6
+        }
+        
+        for day_name, day_num in weekdays.items():
+            if f'next {day_name}' in date_str:
+                days_ahead = (day_num - current_date.weekday() + 7) % 7
+                if days_ahead == 0:  # Today is the target day, so next week
+                    days_ahead = 7
+                target_date = current_date + timedelta(days=days_ahead)
+                return target_date.strftime('%Y-%m-%d')
+            elif f'this {day_name}' in date_str:
+                days_ahead = (day_num - current_date.weekday()) % 7
+                if days_ahead == 0:  # Today is the target day
+                    target_date = current_date
+                else:
+                    target_date = current_date + timedelta(days=days_ahead)
+                return target_date.strftime('%Y-%m-%d')
+        
+        # Handle "in X days"
+        days_pattern = r'in (\d+) days?'
+        match = re.search(days_pattern, date_str)
+        if match:
+            days_count = int(match.group(1))
+            target_date = current_date + timedelta(days=days_count)
+            return target_date.strftime('%Y-%m-%d')
+        
+        # Handle "after X days"
+        after_days_pattern = r'after (\d+) days?'
+        match = re.search(after_days_pattern, date_str)
+        if match:
+            days_count = int(match.group(1))
+            target_date = current_date + timedelta(days=days_count)
+            return target_date.strftime('%Y-%m-%d')
+        
+        # Fall back to original date parsing logic
+        return self._normalize_date(date_str)
+    
     def _normalize_date(self, date_str: str) -> str:
-        """Convert various date formats to YYYY-MM-DD"""
+        """Convert various date formats to YYYY-MM-DD (legacy method)"""
         if not date_str:
             return None
             

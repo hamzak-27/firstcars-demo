@@ -9,7 +9,11 @@ import pandas as pd
 import os
 from datetime import datetime, timedelta
 import json
+import logging
 from typing import List, Tuple, Optional
+
+# Configure logging
+logger = logging.getLogger(__name__)
 
 # Load environment variables from .env file
 try:
@@ -34,12 +38,17 @@ def test_google_sheets_connection():
     return success, message
 
 def create_multiple_bookings_if_needed(booking):
-    """Create multiple booking entries if the request spans multiple dates"""
-    if not booking.start_date or not booking.end_date:
-        return [booking]  # Return single booking if dates are missing
+    """Create multiple booking entries if the request spans multiple dates or is a date range"""
+    if not booking.start_date:
+        return [booking]  # Return single booking if start date is missing
     
     try:
         start_date = datetime.strptime(booking.start_date, '%Y-%m-%d')
+        
+        # If no end date, treat as single booking
+        if not booking.end_date:
+            return [booking]
+        
         end_date = datetime.strptime(booking.end_date, '%Y-%m-%d')
         
         # If same date, return single booking
@@ -49,9 +58,10 @@ def create_multiple_bookings_if_needed(booking):
         # Create multiple bookings for each date
         bookings = []
         current_date = start_date
+        day_counter = 1
         
         while current_date <= end_date:
-            # Create a copy of the original booking
+            # Create a copy of the original booking for each date
             new_booking = BookingExtraction(
                 corporate=booking.corporate,
                 booked_by_name=booking.booked_by_name,
@@ -65,9 +75,8 @@ def create_multiple_bookings_if_needed(booking):
                 vehicle_group=booking.vehicle_group,
                 duty_type=booking.duty_type,
                 start_date=current_date.strftime('%Y-%m-%d'),
-                end_date=current_date.strftime('%Y-%m-%d'),  # Single day booking
+                end_date=current_date.strftime('%Y-%m-%d'),  # Each booking is single day
                 reporting_time=booking.reporting_time,
-                drop_time=booking.drop_time,
                 start_from_garage=booking.start_from_garage,
                 reporting_address=booking.reporting_address,
                 drop_address=booking.drop_address,
@@ -75,7 +84,7 @@ def create_multiple_bookings_if_needed(booking):
                 dispatch_center=booking.dispatch_center,
                 bill_to=booking.bill_to,
                 price=booking.price,
-                remarks=booking.remarks,
+                remarks=f"{booking.remarks or ''} (Day {day_counter} of multi-day booking)".strip(),
                 labels=booking.labels,
                 confidence_score=booking.confidence_score,
                 extraction_reasoning=booking.extraction_reasoning,
@@ -84,11 +93,13 @@ def create_multiple_bookings_if_needed(booking):
             
             bookings.append(new_booking)
             current_date += timedelta(days=1)
+            day_counter += 1
         
         return bookings
         
-    except (ValueError, AttributeError):
+    except (ValueError, AttributeError) as e:
         # If date parsing fails, return original booking
+        logger.warning(f"Date parsing failed for booking: {str(e)}")
         return [booking]
 
 def save_to_google_sheets(booking_data):
@@ -136,8 +147,6 @@ def display_single_booking(booking: BookingExtraction, booking_number: int = Non
             st.write(f"**End Date:** {booking.end_date}")
         if booking.reporting_time:
             st.write(f"**Pickup Time:** {booking.reporting_time}")
-        if booking.drop_time:
-            st.write(f"**Drop Time:** {booking.drop_time}")
         if booking.vehicle_group:
             st.write(f"**Vehicle:** {booking.vehicle_group}")
     

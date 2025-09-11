@@ -328,15 +328,20 @@ TABLE ANALYSIS APPROACH:
         if email_type == 'structured':
             return self.extract_structured_bookings(email_content, sender_email)
         else:
-            # Process as unstructured but convert to structured result format
-            booking = self.extract_booking_data(email_content, sender_email)
+            # Process as unstructured but extract multiple bookings
+            bookings = self.extract_multiple_bookings(email_content, sender_email)
+            
+            if not bookings:
+                # Fallback to single booking extraction if multiple extraction failed
+                single_booking = self.extract_booking_data(email_content, sender_email)
+                bookings = [single_booking] if single_booking.passenger_name or single_booking.from_location else []
             
             return StructuredExtractionResult(
-                bookings=[booking],
-                total_bookings_found=1,
-                extraction_method="unstructured_converted",
-                confidence_score=booking.confidence_score or 0.5,
-                processing_notes="Processed as unstructured email, converted to structured result format"
+                bookings=bookings,
+                total_bookings_found=len(bookings),
+                extraction_method="unstructured_multiple",
+                confidence_score=sum(b.confidence_score or 0.5 for b in bookings) / max(len(bookings), 1),
+                processing_notes=f"Processed as unstructured email with multiple booking detection. Found {len(bookings)} booking(s)."
             )
     
     def get_processing_summary(self, result: StructuredExtractionResult) -> str:
