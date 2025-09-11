@@ -15,22 +15,9 @@ google-auth-httplib2>=0.1.0
 boto3>=1.26.0
 botocore>=1.29.0
 
-# Document processing libraries
+# Document processing libraries (fallback only)
 PyPDF2>=3.0.0
 python-docx>=0.8.11
-openpyxl>=3.0.9
-
-# Image processing (optional - for enhanced image handling)
-Pillow>=9.0.0
 
 # Additional utilities
 typing-extensions>=4.0.0
-
-# Enhanced OCR with LangChain
-langchain>=0.0.200
-langchain-openai>=0.0.5
-langchain-community>=0.0.20
-amazon-textract-caller>=0.2.0
-amazon-textract-textractor>=1.4.0
-tiktoken>=0.4.0
-faiss-cpu>=1.7.4
