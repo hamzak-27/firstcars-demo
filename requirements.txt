@@ -1,5 +1,27 @@
+# Core dependencies
 openai>=1.3.0
 python-dotenv>=1.0.0
 streamlit>=1.28.0
 pandas>=2.0.0
 requests>=2.25.0
+
+# Google Sheets integration
+gspread>=5.7.0
+google-auth>=2.0.0
+google-auth-oauthlib>=0.8.0
+google-auth-httplib2>=0.1.0
+
+# AWS services for document processing
+boto3>=1.26.0
+botocore>=1.29.0
+
+# Document processing libraries
+PyPDF2>=3.0.0
+python-docx>=0.8.11
+openpyxl>=3.0.9
+
+# Image processing (optional - for enhanced image handling)
+Pillow>=9.0.0
+
+# Additional utilities
+typing-extensions>=4.0.0
