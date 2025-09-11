@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 """
 FirstCars Demo Tool - Streamlit Frontend
-A user-friendly interface for the Car Rental AI Agent
+A user-friendly interface for the Multi-Modal Car Rental AI Agent
 """
 
 import streamlit as st
 import pandas as pd
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 import json
+from typing import List, Tuple, Optional
 
 # Load environment variables from .env file
 try:
@@ -17,9 +18,12 @@ try:
 except ImportError:
     st.error("python-dotenv not installed. Install with: pip install python-dotenv")
 
-from car_rental_ai_agent import CarRentalAIAgent, BookingExtraction
+# Import our enhanced processors
+from unified_email_processor import UnifiedEmailProcessor
+from document_processor import DocumentProcessor
+from structured_email_agent import StructuredExtractionResult
+from car_rental_ai_agent import BookingExtraction
 from google_sheets_integration import sheets_manager
-from datetime import datetime, timedelta
 
 # Google Sheets configuration
 GOOGLE_SHEETS_URL = "https://docs.google.com/spreadsheets/d/1zz1xkvI0-XCkU23eBfSW9jSLK--UfCU94iT-poEkf_E/edit#gid=0"
@@ -74,7 +78,8 @@ def create_multiple_bookings_if_needed(booking):
                 remarks=booking.remarks,
                 labels=booking.labels,
                 confidence_score=booking.confidence_score,
-                extraction_reasoning=booking.extraction_reasoning
+                extraction_reasoning=booking.extraction_reasoning,
+                additional_info=booking.additional_info
             )
             
             bookings.append(new_booking)
@@ -103,9 +108,12 @@ def save_to_google_sheets(booking_data):
     except Exception as e:
         return False, f"Failed to save to Google Sheets: {str(e)}"
 
-def display_extracted_data(booking):
-    """Display extracted data in a clean format"""
-    st.subheader("📋 Extracted Information")
+def display_single_booking(booking: BookingExtraction, booking_number: int = None):
+    """Display a single booking in a clean format"""
+    if booking_number:
+        st.subheader(f"📋 Booking #{booking_number}")
+    else:
+        st.subheader("📋 Extracted Information")
     
     # Group fields logically
     col1, col2 = st.columns(2)
@@ -153,6 +161,65 @@ def display_extracted_data(booking):
             st.write(f"**Price:** {booking.price}")
         if booking.remarks:
             st.write(f"**Remarks:** {booking.remarks}")
+    
+    # Show additional info if available
+    if booking.additional_info:
+        with st.expander("📄 Additional Info"):
+            st.text_area("Additional information extracted:", booking.additional_info, height=100, disabled=True)
+
+def display_extraction_results(result: StructuredExtractionResult):
+    """Display structured extraction results"""
+    if not result or not result.bookings:
+        st.error("❌ No bookings found in the processed content")
+        return
+    
+    # Show processing summary
+    st.metric("📊 Bookings Found", result.total_bookings_found)
+    
+    # Display each booking
+    if len(result.bookings) == 1:
+        display_single_booking(result.bookings[0])
+    else:
+        for i, booking in enumerate(result.bookings, 1):
+            with st.expander(f"Booking #{i} - {booking.passenger_name or 'Unknown Passenger'}", expanded=(i == 1)):
+                display_single_booking(booking, i)
+
+def save_extraction_results_to_sheets(result: StructuredExtractionResult):
+    """Save extraction results to Google Sheets"""
+    try:
+        all_bookings_to_save = []
+        
+        # Process each booking for multi-date handling
+        for booking in result.bookings:
+            bookings_to_save = create_multiple_bookings_if_needed(booking)
+            all_bookings_to_save.extend(bookings_to_save)
+        
+        # Save to Google Sheets
+        success, message, total_rows = sheets_manager.append_booking_data(all_bookings_to_save)
+        
+        if success:
+            return True, (total_rows, len(all_bookings_to_save))
+        else:
+            return False, message
+            
+    except Exception as e:
+        return False, f"Failed to save to Google Sheets: {str(e)}"
+
+def validate_uploaded_files(uploaded_files: List) -> List[Tuple[bytes, str]]:
+    """Validate and process uploaded files"""
+    valid_documents = []
+    doc_processor = DocumentProcessor()
+    
+    for uploaded_file in uploaded_files:
+        # Validate file
+        is_valid, error_msg = doc_processor.validate_file(uploaded_file.name, len(uploaded_file.getvalue()))
+        
+        if is_valid:
+            valid_documents.append((uploaded_file.getvalue(), uploaded_file.name))
+        else:
+            st.error(f"❌ {uploaded_file.name}: {error_msg}")
+    
+    return valid_documents
 
 def main():
     """Main Streamlit application"""
@@ -199,89 +266,233 @@ def main():
     # Set the API key in environment for the agent to use
     os.environ['OPENAI_API_KEY'] = api_key
     
-    # Main layout
-    col1, col2 = st.columns([1, 1])
-    
-    with col1:
-        st.subheader("📧 Email Content")
+    # Initialize processors
+    unified_processor = UnifiedEmailProcessor(api_key)
+    document_processor = DocumentProcessor(openai_api_key=api_key)
+
+    # Tabs for different workflows
+    tab1, tab2, tab3, tab4 = st.tabs(["Email Text", "Email Screenshots", "Documents", "Email + Attachments"])
+
+    # Tab 1: Email processing
+    with tab1:
+        st.subheader("📧 Process Email Text")
         email_content = st.text_area(
             "Paste your email content here:",
-            height=400,
+            height=300,
             placeholder="Dear Team,\n\nKindly arrange a cab...\n\nRegards,\nJohn"
         )
-        
-        # Action buttons
         col_btn1, col_btn2 = st.columns(2)
         with col_btn1:
-            extract_btn = st.button("🔍 Extract Data", type="primary", use_container_width=True)
+            process_email_btn = st.button("🔍 Extract from Email", type="primary", use_container_width=True, key="process_email")
         with col_btn2:
-            clear_btn = st.button("🗑️ Clear", use_container_width=True)
-    
-    with col2:
-        st.subheader("📊 Results")
+            clear_email_btn = st.button("🗑️ Clear", use_container_width=True, key="clear_email")
         
-        # Initialize session state
-        if 'booking_data' not in st.session_state:
-            st.session_state.booking_data = None
-        if 'extraction_done' not in st.session_state:
-            st.session_state.extraction_done = False
-        
-        # Clear functionality
-        if clear_btn:
-            st.session_state.booking_data = None
-            st.session_state.extraction_done = False
+        if clear_email_btn:
+            st.session_state.pop('email_result', None)
             st.rerun()
         
-        # Extract data
-        if extract_btn and email_content.strip():
-            with st.spinner("🤖 Processing email with AI..."):
-                try:
-                    agent = CarRentalAIAgent()
-                    booking = agent.extract_booking_data(email_content.strip())
-                    st.session_state.booking_data = booking
-                    st.session_state.extraction_done = True
-                except Exception as e:
-                    st.error(f"❌ Extraction failed: {str(e)}")
-                    st.session_state.booking_data = None
-                    st.session_state.extraction_done = False
-        
-        elif extract_btn and not email_content.strip():
-            st.warning("⚠️ Please enter email content first.")
-        
-        # Display results
-        if st.session_state.extraction_done and st.session_state.booking_data:
-            display_extracted_data(st.session_state.booking_data)
-            
-            # Check if this will create multiple bookings
-            multiple_bookings = create_multiple_bookings_if_needed(st.session_state.booking_data)
-            num_bookings = len(multiple_bookings)
-            
-            # Save to Excel button
-            st.markdown("---")
-            if num_bookings > 1:
-                st.info(f"📅 This booking spans {num_bookings} days and will create {num_bookings} separate Google Sheets rows.")
-                button_text = f"💾 Save {num_bookings} Bookings to Google Sheets"
+        if process_email_btn:
+            if not email_content.strip():
+                st.warning("⚠️ Please enter email content first.")
             else:
-                button_text = "💾 Save to Google Sheets"
-            
-            if st.button(button_text, type="secondary", use_container_width=True):
+                with st.spinner("🤖 Processing email with AI..."):
+                    try:
+                        result = unified_processor.process_email(email_content.strip())
+                        st.session_state.email_result = result
+                    except Exception as e:
+                        st.error(f"❌ Extraction failed: {str(e)}")
+                        st.session_state.email_result = None
+        
+        # Show results
+        if 'email_result' in st.session_state and st.session_state.email_result:
+            display_extraction_results(st.session_state.email_result)
+            st.markdown("---")
+            if st.button("💾 Save to Google Sheets", type="secondary", use_container_width=True, key="save_email"):
                 if not sheets_success:
                     st.error("❌ Cannot save: Google Sheets connection failed. Please check your credentials.")
                 else:
                     with st.spinner("Saving to Google Sheets..."):
-                        success, result = save_to_google_sheets(st.session_state.booking_data)
-                if success:
-                    total_records, bookings_added = result
-                    if bookings_added > 1:
+                        success, result_info = save_extraction_results_to_sheets(st.session_state.email_result)
+                    if success:
+                        total_records, bookings_added = result_info
+                        if bookings_added > 1:
+                            st.success(f"✅ Saved {bookings_added} bookings successfully! Total records: {total_records}")
+                        else:
+                            st.success(f"✅ Saved successfully! Total records: {total_records}")
+                    else:
+                        st.error(f"❌ Save failed: {result_info}")
+
+    # Tab 2: Screenshot processing
+    with tab2:
+        st.subheader("📷 Process Email Screenshots")
+        st.markdown("Upload screenshots of structured emails (with tables) for OCR processing and data extraction.")
+        
+        uploaded_screenshots = st.file_uploader(
+            "Upload email screenshots:",
+            type=['jpg', 'jpeg', 'png', 'gif'],
+            accept_multiple_files=True,
+            key="screenshots"
+        )
+        
+        if uploaded_screenshots:
+            # Validate screenshot files
+            valid_screenshots = []
+            for screenshot in uploaded_screenshots:
+                file_size = len(screenshot.getvalue())
+                if file_size > 10 * 1024 * 1024:  # 10MB limit
+                    st.error(f"❌ {screenshot.name}: File too large (max 10MB)")
+                else:
+                    valid_screenshots.append((screenshot.getvalue(), screenshot.name))
+            
+            if valid_screenshots:
+                if st.button("🔍 Extract from Screenshots", type="primary", use_container_width=True, key="process_screenshots"):
+                    with st.spinner("📷 Processing screenshots with OCR + AI..."):
+                        try:
+                            # Process screenshots through document processor
+                            results = document_processor.process_multiple_documents(valid_screenshots)
+                            
+                            # For screenshots of structured emails, we want to force structured processing
+                            enhanced_results = []
+                            for result in results:
+                                if result.bookings:
+                                    # Try to reprocess with structured agent if we got basic results
+                                    for booking in result.bookings:
+                                        if booking.additional_info and "EXTRACTED TEXT:" in booking.additional_info:
+                                            # Extract the OCR text and reprocess as structured
+                                            ocr_text = booking.additional_info.split("EXTRACTED TEXT:")[1].split("\nEXTRACTED TABLES:")[0].strip()
+                                            if ocr_text:
+                                                # Force structured processing on OCR text
+                                                structured_result = unified_processor.process_email_as_structured(ocr_text)
+                                                if structured_result.bookings and len(structured_result.bookings) > len(result.bookings):
+                                                    enhanced_results.append(structured_result)
+                                                    continue
+                                enhanced_results.append(result)
+                            
+                            st.session_state.screenshot_results = enhanced_results
+                        except Exception as e:
+                            st.error(f"❌ Screenshot processing failed: {str(e)}")
+                            st.session_state.screenshot_results = None
+        
+        if 'screenshot_results' in st.session_state and st.session_state.screenshot_results:
+            st.markdown("### Results")
+            for i, res in enumerate(st.session_state.screenshot_results, 1):
+                with st.expander(f"Screenshot Result #{i}", expanded=(i == 1)):
+                    display_extraction_results(res)
+            
+            st.markdown("---")
+            if st.button("💾 Save All to Google Sheets", type="secondary", use_container_width=True, key="save_screenshots"):
+                if not sheets_success:
+                    st.error("❌ Cannot save: Google Sheets connection failed. Please check your credentials.")
+                else:
+                    with st.spinner("Saving to Google Sheets..."):
+                        # Combine all screenshot bookings
+                        combined = StructuredExtractionResult(
+                            bookings=[b for r in st.session_state.screenshot_results for b in r.bookings],
+                            total_bookings_found=sum(r.total_bookings_found for r in st.session_state.screenshot_results),
+                            extraction_method="screenshots_batch",
+                            confidence_score=0.8,
+                            processing_notes="Batch save from email screenshots"
+                        )
+                        success, result_info = save_extraction_results_to_sheets(combined)
+                    if success:
+                        total_records, bookings_added = result_info
                         st.success(f"✅ Saved {bookings_added} bookings successfully! Total records: {total_records}")
                     else:
-                        st.success(f"✅ Saved successfully! Total records: {total_records}")
-                else:
-                    st.error(f"❌ Save failed: {result}")
+                        st.error(f"❌ Save failed: {result_info}")
+
+    # Tab 3: Document processing
+    with tab3:
+        st.subheader("🖼️ Process Documents (PDF/Word/Images)")
+        uploaded_files = st.file_uploader(
+            "Upload one or more documents:",
+            type=document_processor.get_supported_file_types(),
+            accept_multiple_files=True
+        )
+        if uploaded_files:
+            valid_docs = validate_uploaded_files(uploaded_files)
+            if valid_docs:
+                if st.button("🔍 Extract from Documents", type="primary", use_container_width=True, key="process_docs"):
+                    with st.spinner("🔎 Extracting from documents..."):
+                        try:
+                            results = document_processor.process_multiple_documents(valid_docs)
+                            st.session_state.doc_results = results
+                        except Exception as e:
+                            st.error(f"❌ Document processing failed: {str(e)}")
+                            st.session_state.doc_results = None
         
-        elif not st.session_state.extraction_done:
-            st.info("👈 Enter email content and click 'Extract Data' to see results here.")
-    
+        if 'doc_results' in st.session_state and st.session_state.doc_results:
+            st.markdown("### Results")
+            for i, res in enumerate(st.session_state.doc_results, 1):
+                with st.expander(f"Document Result #{i}", expanded=(i == 1)):
+                    display_extraction_results(res)
+            
+            st.markdown("---")
+            if st.button("💾 Save All to Google Sheets", type="secondary", use_container_width=True, key="save_docs"):
+                if not sheets_success:
+                    st.error("❌ Cannot save: Google Sheets connection failed. Please check your credentials.")
+                else:
+                    with st.spinner("Saving to Google Sheets..."):
+                        # Combine all document bookings into a single result-like object
+                        combined = StructuredExtractionResult(
+                            bookings=[b for r in st.session_state.doc_results for b in r.bookings],
+                            total_bookings_found=sum(r.total_bookings_found for r in st.session_state.doc_results),
+                            extraction_method="documents_batch",
+                            confidence_score=0.8,
+                            processing_notes="Batch save from documents"
+                        )
+                        success, result_info = save_extraction_results_to_sheets(combined)
+                    if success:
+                        total_records, bookings_added = result_info
+                        st.success(f"✅ Saved {bookings_added} bookings successfully! Total records: {total_records}")
+                    else:
+                        st.error(f"❌ Save failed: {result_info}")
+
+    # Tab 4: Combined processing
+    with tab4:
+        st.subheader("📧+🖼️ Process Email with Attachments")
+        email_content_combined = st.text_area(
+            "Paste your email content here:",
+            height=200,
+            key="combined_email",
+            placeholder="Dear Team,\n\nPlease find the attached booking details..."
+        )
+        uploaded_files_combined = st.file_uploader(
+            "Upload attachments:",
+            type=document_processor.get_supported_file_types(),
+            accept_multiple_files=True,
+            key="combined_files"
+        )
+        if st.button("🤖 Process Email + Attachments", type="primary", use_container_width=True, key="process_combined"):
+            if not email_content_combined.strip() and not uploaded_files_combined:
+                st.warning("⚠️ Enter email content or upload at least one attachment.")
+            else:
+                valid_docs = validate_uploaded_files(uploaded_files_combined or [])
+                with st.spinner("Processing email and attachments..."):
+                    try:
+                        result = document_processor.combine_email_and_documents(
+                            email_content=email_content_combined.strip(),
+                            documents=valid_docs
+                        )
+                        st.session_state.combined_result = result
+                    except Exception as e:
+                        st.error(f"❌ Combined processing failed: {str(e)}")
+                        st.session_state.combined_result = None
+        
+        if 'combined_result' in st.session_state and st.session_state.combined_result:
+            display_extraction_results(st.session_state.combined_result)
+            st.markdown("---")
+            if st.button("💾 Save to Google Sheets", type="secondary", use_container_width=True, key="save_combined"):
+                if not sheets_success:
+                    st.error("❌ Cannot save: Google Sheets connection failed. Please check your credentials.")
+                else:
+                    with st.spinner("Saving to Google Sheets..."):
+                        success, result_info = save_extraction_results_to_sheets(st.session_state.combined_result)
+                    if success:
+                        total_records, bookings_added = result_info
+                        st.success(f"✅ Saved {bookings_added} bookings successfully! Total records: {total_records}")
+                    else:
+                        st.error(f"❌ Save failed: {result_info}")
+
     # Footer with Google Sheets info
     st.markdown("---")
     col_info1, col_info2, col_info3 = st.columns(3)

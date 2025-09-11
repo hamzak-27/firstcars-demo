@@ -6,6 +6,7 @@ Extracts structured booking data from unstructured emails using GPT-4o with chai
 import os
 import json
 import re
+import csv
 import logging
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any, Tuple
@@ -42,7 +43,6 @@ class BookingExtraction:
     start_date: Optional[str] = None
     end_date: Optional[str] = None
     reporting_time: Optional[str] = None
-    drop_time: Optional[str] = None
     start_from_garage: Optional[str] = None
     reporting_address: Optional[str] = None
     drop_address: Optional[str] = None
@@ -52,6 +52,7 @@ class BookingExtraction:
     price: Optional[str] = None
     remarks: Optional[str] = None
     labels: Optional[str] = None
+    additional_info: Optional[str] = None
     confidence_score: Optional[float] = None
     extraction_reasoning: Optional[str] = None
     
@@ -76,7 +77,6 @@ class BookingExtraction:
             self.start_date or "",
             self.end_date or "",
             self.reporting_time or "",
-            self.drop_time or "",
             self.start_from_garage or "",
             self.reporting_address or "",
             self.drop_address or "",
@@ -85,7 +85,8 @@ class BookingExtraction:
             self.bill_to or "",
             self.price or "",
             self.remarks or "",
-            self.labels or ""
+            self.labels or "",
+            self.additional_info or ""
         ]
     
     def get_missing_critical_fields(self) -> List[str]:
@@ -147,6 +148,10 @@ class CarRentalAIAgent:
             'november': '11', 'nov': '11',
             'december': '12', 'dec': '12'
         }
+        
+        # Load city and vehicle mappings
+        self.city_mappings = self._load_city_mappings()
+        self.vehicle_mappings_csv = self._load_vehicle_mappings()
     
     def extract_booking_data(self, email_content: str, sender_email: str = None) -> BookingExtraction:
         """
@@ -255,7 +260,6 @@ Please provide your analysis in this EXACT JSON format:
         "start_date": "YYYY-MM-DD format or null",
         "end_date": "YYYY-MM-DD format or null",
         "reporting_time": "HH:MM format or null",
-        "drop_time": "HH:MM format or null",
         "start_from_garage": "garage info or null",
         "reporting_address": "complete pickup address or null",
         "drop_address": "complete drop address or null",
@@ -264,7 +268,8 @@ Please provide your analysis in this EXACT JSON format:
         "bill_to": "billing entity or null",
         "price": "price info or null",
         "remarks": "special instructions/notes or null",
-        "labels": "any labels or null"
+        "labels": "any labels or null",
+        "additional_info": "any other relevant information not captured above or null"
     }},
     "confidence_score": 0.85
 }}
@@ -334,13 +339,16 @@ Return ONLY valid JSON, no additional text."""
                 
                 # Field-specific processing
                 if field == 'vehicle_group':
-                    processed[field] = self._normalize_vehicle_type(value)
+                    processed[field] = self._map_vehicle_type(value)
+                elif field in ['from_location', 'to_location']:
+                    processed[field] = self._map_city_name(value)
                 elif field in ['booked_by_phone', 'passenger_phone']:
                     processed[field] = self._clean_phone_number(value)
                 elif field in ['start_date', 'end_date']:
                     processed[field] = self._normalize_date(value)
-                elif field in ['reporting_time', 'drop_time']:
-                    processed[field] = self._normalize_time(value)
+                elif field == 'reporting_time':
+                    normalized_time = self._normalize_time(value)
+                    processed[field] = self._round_time_to_15_minutes(normalized_time)
                 else:
                     processed[field] = value if value else None
             else:
@@ -477,6 +485,125 @@ Return ONLY valid JSON, no additional text."""
         # Return original if can't parse
         logger.warning(f"Could not parse time: {time_str}")
         return time_str
+    
+    def _load_city_mappings(self) -> Dict[str, str]:
+        """Load city mappings from CSV file"""
+        city_mappings = {}
+        try:
+            with open('City(1).xlsx - Sheet1.csv', 'r', encoding='utf-8') as file:
+                reader = csv.DictReader(file)
+                for row in reader:
+                    city_name = row.get('City name (As per mail)', '').strip()
+                    dispatch_center = row.get('Dispatch Centre (To be entered in Indecab)', '').strip()
+                    if city_name and dispatch_center and dispatch_center != 'NA':
+                        city_mappings[city_name.lower()] = dispatch_center
+            logger.info(f"Loaded {len(city_mappings)} city mappings")
+        except Exception as e:
+            logger.warning(f"Failed to load city mappings: {str(e)}")
+        return city_mappings
+    
+    def _load_vehicle_mappings(self) -> Dict[str, str]:
+        """Load vehicle mappings from CSV file"""
+        vehicle_mappings = {}
+        try:
+            with open('Car.xlsx - Sheet1.csv', 'r', encoding='utf-8') as file:
+                reader = csv.DictReader(file)
+                for row in reader:
+                    car_name = row.get('Car name (As per mail)', '').strip()
+                    vehicle_group = row.get('Vehicle Group (To be entered in Indecab)', '').strip()
+                    if car_name and vehicle_group and vehicle_group != 'NA':
+                        vehicle_mappings[car_name.lower()] = vehicle_group
+            logger.info(f"Loaded {len(vehicle_mappings)} vehicle mappings")
+        except Exception as e:
+            logger.warning(f"Failed to load vehicle mappings: {str(e)}")
+        return vehicle_mappings
+    
+    def _map_city_name(self, location: str) -> str:
+        """Map location/address to standardized city name"""
+        if not location:
+            return None
+            
+        location_lower = location.lower().strip()
+        
+        # Check for exact match first
+        if location_lower in self.city_mappings:
+            return self.city_mappings[location_lower]
+        
+        # Check for partial matches
+        for city_variant, standard_city in self.city_mappings.items():
+            if city_variant in location_lower or location_lower in city_variant:
+                return standard_city
+        
+        # If no match found, return original location
+        return location
+    
+    def _map_vehicle_type(self, vehicle: str) -> str:
+        """Map vehicle name to standardized vehicle group using CSV data"""
+        if not vehicle:
+            return None
+            
+        vehicle_lower = vehicle.lower().strip()
+        
+        # Check CSV mappings first
+        if vehicle_lower in self.vehicle_mappings_csv:
+            return self.vehicle_mappings_csv[vehicle_lower]
+        
+        # Check for partial matches in CSV data
+        for car_name, vehicle_group in self.vehicle_mappings_csv.items():
+            if car_name in vehicle_lower or vehicle_lower in car_name:
+                return vehicle_group
+        
+        # Fallback to original hardcoded mappings
+        if vehicle_lower in self.vehicle_mappings:
+            return self.vehicle_mappings[vehicle_lower]
+        
+        for pattern, standard in self.vehicle_mappings.items():
+            if pattern in vehicle_lower:
+                return standard
+        
+        # Return original if no match
+        return vehicle
+    
+    def _round_time_to_15_minutes(self, time_str: str) -> str:
+        """Round time to nearest 15-minute interval (8:00, 8:15, 8:30, 8:45)"""
+        if not time_str:
+            return None
+            
+        try:
+            # Parse time string to get hour and minute
+            if ':' in time_str:
+                hour_str, minute_str = time_str.split(':')[:2]
+                hour = int(hour_str)
+                minute = int(minute_str)
+            else:
+                # Handle cases like "830" or "8"
+                if len(time_str) <= 2:
+                    hour = int(time_str)
+                    minute = 0
+                else:
+                    hour = int(time_str[:-2])
+                    minute = int(time_str[-2:])
+            
+            # Round minute to nearest 15-minute interval
+            if minute <= 7:        # 0-7 → :00
+                rounded_minute = 0
+            elif minute <= 22:     # 8-22 → :15
+                rounded_minute = 15
+            elif minute <= 37:     # 23-37 → :30
+                rounded_minute = 30
+            elif minute <= 52:     # 38-52 → :45
+                rounded_minute = 45
+            else:                  # 53-59 → next hour :00
+                rounded_minute = 0
+                hour += 1
+                if hour >= 24:
+                    hour = 0
+            
+            return f"{hour:02d}:{rounded_minute:02d}"
+            
+        except (ValueError, IndexError) as e:
+            logger.warning(f"Could not round time '{time_str}': {str(e)}")
+            return time_str
     
     def validate_extraction(self, booking: BookingExtraction) -> Dict[str, Any]:
         """Validate extracted booking data and provide feedback"""
