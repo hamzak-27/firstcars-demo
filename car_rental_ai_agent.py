@@ -33,9 +33,11 @@ class BookingExtraction:
     booked_by_name: Optional[str] = None
     booked_by_phone: Optional[str] = None
     booked_by_email: Optional[str] = None
-    passenger_name: Optional[str] = None
-    passenger_phone: Optional[str] = None
-    passenger_email: Optional[str] = None
+    passenger_name: Optional[str] = None  # Primary passenger name
+    passenger_phone: Optional[str] = None  # Primary passenger phone
+    passenger_email: Optional[str] = None  # Primary passenger email
+    additional_passengers: Optional[str] = None  # Other passenger names (comma-separated)
+    multiple_pickup_locations: Optional[str] = None  # Multiple pickup addresses (comma-separated)
     from_location: Optional[str] = None
     to_location: Optional[str] = None
     vehicle_group: Optional[str] = None
@@ -70,6 +72,8 @@ class BookingExtraction:
             self.passenger_name or "",
             self.passenger_phone or "",
             self.passenger_email or "",
+            self.additional_passengers or "",
+            self.multiple_pickup_locations or "",
             self.from_location or "",
             self.to_location or "",
             self.vehicle_group or "",
@@ -118,13 +122,16 @@ class CarRentalAIAgent:
         
         self.client = OpenAI(api_key=self.openai_api_key)
         
-        # Vehicle type standardization mapping
+        # Vehicle type standardization mapping with business rules
         self.vehicle_mappings = {
             'swift': 'Swift Dzire',
             'dzire': 'Swift Dzire',
             'desire': 'Swift Dzire',
-            'innova': 'Toyota Innova',
-            'crysta': 'Toyota Innova Crysta',
+            'innova': 'Innova Crysta',  # Business rule: Toyota Innova -> Innova Crysta
+            'toyota innova': 'Innova Crysta',  # Business rule: Toyota Innova -> Innova Crysta
+            'crysta': 'Innova Crysta',
+            'innova crysta': 'Innova Crysta',
+            'toyota innova crysta': 'Innova Crysta',
             'etios': 'Toyota Etios',
             'sedan': 'Sedan',
             'suv': 'SUV',
@@ -152,6 +159,74 @@ class CarRentalAIAgent:
         # Load city and vehicle mappings
         self.city_mappings = self._load_city_mappings()
         self.vehicle_mappings_csv = self._load_vehicle_mappings()
+    
+    def _normalize_time_to_15min_intervals(self, time_str: str) -> str:
+        """
+        Normalize time to 15-minute intervals based on business rules:
+        - 7:00-7:14 → 7:00
+        - 7:15-7:29 → 7:15  
+        - 7:30-7:44 → 7:30
+        - 7:45-7:59 → 7:45
+        """
+        if not time_str:
+            return time_str
+            
+        try:
+            # Parse time string (handle various formats)
+            import re
+            time_match = re.search(r'(\d{1,2})[:.](\d{2})', time_str)
+            if not time_match:
+                return time_str
+                
+            hour = int(time_match.group(1))
+            minute = int(time_match.group(2))
+            
+            # Normalize minutes to 15-minute intervals
+            if minute < 15:
+                normalized_minute = 0
+            elif minute < 30:
+                normalized_minute = 15
+            elif minute < 45:
+                normalized_minute = 30
+            else:
+                normalized_minute = 45
+                
+            # Format as HH:MM
+            return f"{hour:02d}:{normalized_minute:02d}"
+            
+        except Exception as e:
+            logger.warning(f"Could not normalize time '{time_str}': {e}")
+            return time_str
+    
+    def _apply_business_rules(self, booking: BookingExtraction) -> BookingExtraction:
+        """
+        Apply business rules to extracted booking data
+        """
+        # Rule 1: Toyota Innova -> Innova Crysta (already handled in vehicle mappings)
+        
+        # Rule 2: Round trip drop city logic (Mumbai to Daman and back to Mumbai = drop Mumbai)
+        if booking.from_location and booking.to_location:
+            # Check for round trip patterns
+            from_loc = booking.from_location.lower()
+            to_loc = booking.to_location.lower()
+            
+            # Look for "and back to" patterns in additional_info or remarks
+            combined_text = f"{booking.additional_info or ''} {booking.remarks or ''}".lower()
+            
+            if "back to" in combined_text or "return to" in combined_text:
+                # Extract the return destination
+                back_match = re.search(r'(?:back to|return to)\s+([^\s,\.]+)', combined_text)
+                if back_match:
+                    return_city = back_match.group(1).strip()
+                    # If it matches the from_location, set it as drop
+                    if return_city in from_loc or from_loc in return_city:
+                        booking.to_location = booking.from_location
+        
+        # Rule 3: Time precision with 15-minute intervals
+        if booking.reporting_time:
+            booking.reporting_time = self._normalize_time_to_15min_intervals(booking.reporting_time)
+        
+        return booking
     
     def extract_booking_data(self, email_content: str, sender_email: str = None) -> BookingExtraction:
         """
@@ -223,32 +298,37 @@ class CarRentalAIAgent:
         current_date_str = current_date.strftime('%Y-%m-%d')
         current_day_name = current_date.strftime('%A')
         
-        system_prompt = f"""You are an expert AI agent specialized in extracting car rental booking information from unstructured emails. You must identify ALL separate bookings mentioned in the email content.
+        system_prompt = f"""You are an expert AI agent specialized in extracting car rental booking information from unstructured emails. You must identify ALL separate bookings and extract comprehensive details.
 
-IMPORTANT RULES:
-1. Analyze the email for MULTIPLE bookings - each booking should be a separate record
-2. Different dates = different bookings (even same passenger)
-3. Different passengers = different bookings (even same date)
-4. Different pickup/drop locations = different bookings
-5. Handle relative dates like "tomorrow", "next Monday", "today" using current date: {current_date_str} ({current_day_name})
-6. Normalize vehicle names and locations using provided mappings
-7. Convert all dates to YYYY-MM-DD format
-8. Convert times to HH:MM 24-hour format
+CRITICAL BUSINESS RULES:
+1. MULTIPLE BOOKINGS: Analyze for multiple separate bookings (different dates/passengers/locations)
+2. VEHICLE STANDARDIZATION: Toyota Innova/Innova → Innova Crysta (MANDATORY)
+3. ROUND TRIP LOGIC: If route is "Mumbai to Daman and back to Mumbai" → drop city = Mumbai  
+4. TIME PRECISION: Use exact times - do NOT round (7:10 stays 7:10, not 7:15)
+5. COMPREHENSIVE REMARKS: Extract ALL details - driver preferences, special instructions, contact numbers
+6. MULTIPLE PASSENGERS: Capture all passenger names if multiple mentioned
+7. MULTIPLE PICKUPS: Capture all pickup locations if multiple mentioned
 
 DATE CONVERSION REFERENCE (Today is {current_date_str}, {current_day_name}):
 - "today" = {current_date_str}
 - "tomorrow" = {(current_date + timedelta(days=1)).strftime('%Y-%m-%d')}
 - "day after tomorrow" = {(current_date + timedelta(days=2)).strftime('%Y-%m-%d')}
 - "next Monday" = next occurrence of that weekday
-- "this Friday" = this week's Friday if not past, otherwise next week
 
-VEHICLE STANDARDIZATION:
+VEHICLE STANDARDIZATION (MANDATORY):
 - Dzire/Desire → Swift Dzire
-- Crysta → Toyota Innova Crysta
+- Toyota Innova/Innova → Innova Crysta (BUSINESS RULE)
+- Crysta → Innova Crysta
 - Etios → Toyota Etios
-- Innova → Toyota Innova
 - AC Cab → AC Sedan
-- Tempo Traveller → Tempo Traveller"""
+- Tempo Traveller → Tempo Traveller
+
+REMARKS EXTRACTION:
+- Include ALL special instructions
+- Extract driver name/contact if mentioned (e.g., "need driver XYZ - 9876543210")
+- Include cleanliness requirements, timing instructions, special needs
+- Capture payment instructions, billing details
+- Note any VIP/special guest requirements"""
         
         user_prompt = f"""
 Please analyze this car rental email and extract ALL separate bookings. Look carefully for:
@@ -276,9 +356,11 @@ Please provide your analysis in this EXACT JSON format:
             "booked_by_name": "booker name or null",
             "booked_by_phone": "booker phone or null", 
             "booked_by_email": "booker email or null",
-            "passenger_name": "passenger name or null",
-            "passenger_phone": "passenger phone (10 digits) or null",
-            "passenger_email": "passenger email or null",
+            "passenger_name": "primary passenger name or null",
+            "passenger_phone": "primary passenger phone (10 digits) or null",
+            "passenger_email": "primary passenger email or null",
+            "additional_passengers": "other passenger names (comma-separated) or null",
+            "multiple_pickup_locations": "multiple pickup addresses (comma-separated) or null",
             "from_location": "source location or null",
             "to_location": "destination location or null", 
             "vehicle_group": "standardized vehicle name or null",
@@ -483,6 +565,10 @@ Return ONLY valid JSON, no additional text."""
                 
                 # Create BookingExtraction object
                 booking = BookingExtraction(**processed_data)
+                
+                # Apply business rules
+                booking = self._apply_business_rules(booking)
+                
                 bookings.append(booking)
                 
             except Exception as e:
@@ -512,8 +598,9 @@ Return ONLY valid JSON, no additional text."""
                 elif field in ['start_date', 'end_date']:
                     processed[field] = self._normalize_date_with_relative(value)
                 elif field == 'reporting_time':
+                    # Use new business rule time normalization (15-minute intervals)
                     normalized_time = self._normalize_time(value)
-                    processed[field] = self._round_time_to_15_minutes(normalized_time)
+                    processed[field] = self._normalize_time_to_15min_intervals(normalized_time)
                 else:
                     processed[field] = value if value else None
             else:

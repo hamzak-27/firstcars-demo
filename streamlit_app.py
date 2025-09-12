@@ -139,11 +139,14 @@ def display_single_booking(booking: BookingExtraction, booking_number: int = Non
     with col1:
         st.markdown("**👤 Passenger Details**")
         if booking.passenger_name:
-            st.write(f"**Name:** {booking.passenger_name}")
+            st.write(f"**Primary Passenger:** {booking.passenger_name}")
         if booking.passenger_phone:
             st.write(f"**Phone:** {booking.passenger_phone}")
         if booking.passenger_email:
             st.write(f"**Email:** {booking.passenger_email}")
+        # Display additional passengers if present
+        if hasattr(booking, 'additional_passengers') and booking.additional_passengers:
+            st.write(f"**Other Passengers:** {booking.additional_passengers}")
         if booking.corporate:
             st.write(f"**Corporate:** {booking.corporate}")
         
@@ -164,7 +167,10 @@ def display_single_booking(booking: BookingExtraction, booking_number: int = Non
         if booking.to_location:
             st.write(f"**To:** {booking.to_location}")
         if booking.reporting_address:
-            st.write(f"**Pickup Address:** {booking.reporting_address}")
+            st.write(f"**Primary Pickup:** {booking.reporting_address}")
+        # Display multiple pickup locations if present
+        if hasattr(booking, 'multiple_pickup_locations') and booking.multiple_pickup_locations:
+            st.write(f"**Additional Pickups:** {booking.multiple_pickup_locations}")
         if booking.drop_address:
             st.write(f"**Drop Address:** {booking.drop_address}")
         
@@ -288,12 +294,34 @@ def main():
     else:
         st.warning(f"⚠️ Document processing not available: {globals().get('DOCUMENT_PROCESSOR_ERROR', 'Unknown error')}")
     
-    # Create tabs if document processor is available
+    # Initialize DOCX processor
+    docx_processor = None
+    try:
+        from docx_document_processor import DocxDocumentProcessor
+        docx_processor = DocxDocumentProcessor(openai_api_key=api_key)
+        st.success("📄 Word Document Processing is available!")
+    except ImportError as e:
+        st.warning(f"⚠️ Word document processing not available: python-docx not installed")
+    except Exception as e:
+        st.warning(f"⚠️ Word document processor initialization failed: {str(e)}")
+    
+    # Create tabs based on available processors
+    tabs_list = ["Email Processing"]
     if document_processor:
-        tab1, tab2 = st.tabs(["Email Processing", "Document Processing"])
+        tabs_list.append("Document Processing (S3+Textract)")
+    if docx_processor:
+        tabs_list.append("Word Document Processing")
+    
+    if len(tabs_list) > 1:
+        tabs = st.tabs(tabs_list)
+        tab1 = tabs[0]
+        tab2 = tabs[1] if document_processor else None
+        tab3 = tabs[-1] if docx_processor else None  # Word doc tab is always last
     else:
         # Single email processing interface
         tab1 = st.container()
+        tab2 = None
+        tab3 = None
 
     # Tab 1: Email Processing
     with tab1:
@@ -370,10 +398,10 @@ def main():
             elif not st.session_state.extraction_done:
                 st.info("👈 Enter email content and click 'Extract Data' to see results here.")
     
-    # Tab 2: Document Processing (only if document processor is available)
-    if document_processor:
+    # Tab 2: Document Processing (S3+Textract) if available
+    if document_processor and tab2:
         with tab2:
-            st.subheader("🖼️ Document Processing")
+            st.subheader("🖼️ Document Processing (S3 + Textract)")
             st.markdown("**Upload booking documents (PDFs, Word docs, or email screenshots) for intelligent extraction**")
             
             uploaded_files = st.file_uploader(
@@ -449,6 +477,95 @@ def main():
                                 if success:
                                     total_records, bookings_added = result_info
                                     st.success(f"✅ Saved {bookings_added} bookings from {len(st.session_state.doc_results)} documents! Total records: {total_records}")
+                                else:
+                                    st.error(f"❌ Save failed: {result_info}")
+                            else:
+                                st.warning("⚠️ No bookings to save")
+
+    # Tab 3: Word Document Processing (.docx files)
+    if docx_processor and tab3:
+        with tab3:
+            st.subheader("📄 Word Document Processing")
+            st.markdown("**Upload .docx files for intelligent booking extraction using python-docx**")
+            
+            docx_files = st.file_uploader(
+                "Choose .docx files to upload:",
+                type=['docx'],
+                accept_multiple_files=True,
+                help="Supported format: Microsoft Word documents (.docx only)",
+                key="docx_uploader"
+            )
+            
+            if docx_files:
+                # Validate files
+                valid_docx_files = []
+                for uploaded_file in docx_files:
+                    is_valid, error_msg = docx_processor.validate_file(uploaded_file.name, len(uploaded_file.getvalue()))
+                    
+                    if is_valid:
+                        valid_docx_files.append((uploaded_file.getvalue(), uploaded_file.name))
+                        st.success(f"✅ {uploaded_file.name} - Ready for processing")
+                    else:
+                        st.error(f"❌ {uploaded_file.name}: {error_msg}")
+                
+                if valid_docx_files:
+                    if st.button("🔍 Process Word Documents", type="primary", use_container_width=True, key="docx_process"):
+                        with st.spinner(f"📄 Processing {len(valid_docx_files)} Word document(s) with python-docx + AI..."):
+                            try:
+                                docx_results = []
+                                for file_content, filename in valid_docx_files:
+                                    result = docx_processor.process_document(file_content, filename)
+                                    docx_results.append(result)
+                                
+                                st.session_state.docx_results = docx_results
+                                st.session_state.docx_processing_done = True
+                            except Exception as e:
+                                st.error(f"❌ Word document processing failed: {str(e)}")
+                                st.session_state.docx_results = None
+                                st.session_state.docx_processing_done = False
+            
+            # Display Word document processing results
+            if st.session_state.get('docx_processing_done') and st.session_state.get('docx_results'):
+                st.markdown("### 📊 Word Document Processing Results")
+                
+                total_bookings = sum(len(r.bookings) for r in st.session_state.docx_results)
+                st.info(f"📊 Found {total_bookings} total booking(s) from {len(st.session_state.docx_results)} Word document(s)")
+                
+                for i, result in enumerate(st.session_state.docx_results, 1):
+                    with st.expander(f"Document {i} Results ({len(result.bookings)} booking(s))", expanded=(i == 1)):
+                        st.markdown(f"**Processing Method:** {result.extraction_method}")
+                        if result.processing_notes:
+                            st.markdown(f"**Notes:** {result.processing_notes}")
+                        
+                        display_extraction_results(result)
+                
+                # Save all Word documents button
+                st.markdown("---")
+                if st.button("💾 Save All Word Documents to Google Sheets", type="secondary", use_container_width=True, key="docx_save_all"):
+                    if not sheets_success:
+                        st.error("❌ Cannot save: Google Sheets connection failed. Please check your credentials.")
+                    else:
+                        with st.spinner("Saving all Word document results to Google Sheets..."):
+                            # Combine all bookings from all Word documents
+                            all_docx_bookings = []
+                            for result in st.session_state.docx_results:
+                                all_docx_bookings.extend(result.bookings)
+                            
+                            if all_docx_bookings:
+                                # Create combined result
+                                combined_docx_result = StructuredExtractionResult(
+                                    bookings=all_docx_bookings,
+                                    total_bookings_found=len(all_docx_bookings),
+                                    extraction_method="docx_batch_processing",
+                                    confidence_score=0.8,
+                                    processing_notes=f"Batch processing of {len(st.session_state.docx_results)} Word documents"
+                                )
+                                
+                                success, result_info = save_extraction_results_to_sheets(combined_docx_result)
+                                
+                                if success:
+                                    total_records, bookings_added = result_info
+                                    st.success(f"✅ Saved {bookings_added} bookings from {len(st.session_state.docx_results)} Word documents! Total records: {total_records}")
                                 else:
                                     st.error(f"❌ Save failed: {result_info}")
                             else:
