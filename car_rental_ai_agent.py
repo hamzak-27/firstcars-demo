@@ -309,6 +309,11 @@ CRITICAL BUSINESS RULES:
 6. MULTIPLE PASSENGERS: Capture all passenger names if multiple mentioned
 7. MULTIPLE PICKUPS: Capture all pickup locations if multiple mentioned
 
+CRITICAL DATE FORMAT:
+- Input dates are in DD/MM/YYYY format (e.g., 27/08/2025 = 27th August 2025)
+- Convert to YYYY-MM-DD (e.g., 27/08/2025 → 2025-08-27)
+- DO NOT interpret as MM/DD/YYYY or YYYY/MM/DD
+
 DATE CONVERSION REFERENCE (Today is {current_date_str}, {current_day_name}):
 - "today" = {current_date_str}
 - "tomorrow" = {(current_date + timedelta(days=1)).strftime('%Y-%m-%d')}
@@ -365,8 +370,8 @@ Please provide your analysis in this EXACT JSON format:
             "to_location": "destination location or null", 
             "vehicle_group": "standardized vehicle name or null",
             "duty_type": "duty type or null",
-            "start_date": "YYYY-MM-DD format (convert relative dates) or null",
-            "end_date": "YYYY-MM-DD format or null",
+            "start_date": "YYYY-MM-DD format (e.g., 27/08/2025 → 2025-08-27, convert relative dates) or null",
+            "end_date": "YYYY-MM-DD format (e.g., 27/08/2025 → 2025-08-27) or null",
             "reporting_time": "HH:MM format or null",
             "start_from_garage": "garage info or null",
             "reporting_address": "complete pickup address or null",
@@ -778,11 +783,12 @@ Return ONLY valid JSON, no additional text."""
                 month = self.month_mappings[month_name]
                 return f"{year}-{month}-{day.zfill(2)}"
         
-        # Pattern 2: "27/08/2025", "27-08-2025"
+        # Pattern 2: "27/08/2025", "27-08-2025" (DD/MM/YYYY format)
         pattern2 = r'(\d{1,2})[/-](\d{1,2})[/-](\d{4})'
         match = re.search(pattern2, date_str)
         if match:
             day, month, year = match.groups()
+            # CRITICAL FIX: DD/MM/YYYY format - day comes first, then month
             return f"{year}-{month.zfill(2)}-{day.zfill(2)}"
         
         # Pattern 3: "2025-08-27" (already formatted)

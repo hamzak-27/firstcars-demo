@@ -214,11 +214,16 @@ FLIGHT EXTRACTION RULES:
 7. Capture flight status, gate, terminal information
 8. Include baggage and meal information if present
 
+CRITICAL DATE FORMAT:
+- Input dates are in DD/MM/YYYY format (e.g., 13/09/2025 = 13th September 2025)
+- Convert to YYYY-MM-DD (e.g., 13/09/2025 → 2025-09-13)
+- DO NOT interpret as MM/DD/YYYY or YYYY/MM/DD
+
 COMMON PATTERNS:
 - Flight numbers: AI 2859, 6E 123, SG 456
 - Airport codes: DEL, BOM, BLR, MAA, CCU
 - Times: 07:30, 7:30 AM, 1930 hrs
-- Dates: 12-Sep-25, 12/09/2025, Sep 12 2025
+- Dates: 12-Sep-25, 13/09/2025 (DD/MM/YYYY), Sep 13 2025
 - Booking refs: ABC123, 6E4ABC, ABCDEF
 
 AIRLINE CODES:
@@ -247,11 +252,11 @@ Extract flight details in this EXACT JSON format:
             "airline": "full airline name or null",
             "departure_airport": "IATA code (e.g., DEL) or null",
             "departure_city": "city name or null", 
-            "departure_date": "YYYY-MM-DD format or null",
+            "departure_date": "YYYY-MM-DD format (e.g., 13/09/2025 → 2025-09-13) or null",
             "departure_time": "HH:MM format or null",
             "arrival_airport": "IATA code (e.g., BOM) or null",
             "arrival_city": "city name or null",
-            "arrival_date": "YYYY-MM-DD format or null", 
+            "arrival_date": "YYYY-MM-DD format (e.g., 13/09/2025 → 2025-09-13) or null", 
             "arrival_time": "HH:MM format or null",
             "passenger_name": "passenger name or null",
             "booking_reference": "booking/PNR reference or null",
@@ -437,13 +442,14 @@ Return ONLY valid JSON, no additional text."""
                 month = month_mappings[month_name]
                 return f"{year}-{month}-{day.zfill(2)}"
         
-        # Pattern 2: "12/09/2025", "12-09-25"
+        # Pattern 2: "13/09/2025", "13-09-25" (DD/MM/YYYY format)
         pattern2 = r'(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})'
         match = re.search(pattern2, date_str)
         if match:
             day, month, year = match.groups()
             if len(year) == 2:
                 year = "20" + year
+            # CRITICAL FIX: DD/MM/YYYY format - day comes first, then month
             return f"{year}-{month.zfill(2)}-{day.zfill(2)}"
         
         # Return original if can't parse
