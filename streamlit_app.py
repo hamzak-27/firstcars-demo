@@ -126,6 +126,99 @@ def save_to_google_sheets(booking_data):
     except Exception as e:
         return False, f"Failed to save to Google Sheets: {str(e)}"
 
+def display_single_flight(flight, flight_number: int = None):
+    """Display a single flight in a clean format"""
+    if flight_number:
+        st.subheader(f"✈️ Flight #{flight_number}")
+    else:
+        st.subheader("✈️ Flight Information")
+    
+    # Group fields logically
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown("**📋 Flight Details**")
+        if flight.flight_number:
+            st.write(f"**Flight:** {flight.flight_number}")
+        if flight.airline:
+            st.write(f"**Airline:** {flight.airline}")
+        if flight.aircraft_type:
+            st.write(f"**Aircraft:** {flight.aircraft_type}")
+        if flight.flight_duration:
+            st.write(f"**Duration:** {flight.flight_duration}")
+        if flight.status:
+            st.write(f"**Status:** {flight.status}")
+        
+        st.markdown("**👤 Passenger Info**")
+        if flight.passenger_name:
+            st.write(f"**Passenger:** {flight.passenger_name}")
+        if flight.booking_reference:
+            st.write(f"**PNR/Booking:** {flight.booking_reference}")
+        if flight.seat_number:
+            st.write(f"**Seat:** {flight.seat_number}")
+    
+    with col2:
+        st.markdown("**🛫 Departure**")
+        if flight.departure_airport:
+            st.write(f"**Airport:** {flight.departure_airport}")
+        if flight.departure_city:
+            st.write(f"**City:** {flight.departure_city}")
+        if flight.departure_date:
+            st.write(f"**Date:** {flight.departure_date}")
+        if flight.departure_time:
+            st.write(f"**Time:** {flight.departure_time}")
+        
+        st.markdown("**🛬 Arrival**")
+        if flight.arrival_airport:
+            st.write(f"**Airport:** {flight.arrival_airport}")
+        if flight.arrival_city:
+            st.write(f"**City:** {flight.arrival_city}")
+        if flight.arrival_date:
+            st.write(f"**Date:** {flight.arrival_date}")
+        if flight.arrival_time:
+            st.write(f"**Time:** {flight.arrival_time}")
+    
+    # Additional information in expandable sections
+    if any([flight.gate, flight.terminal, flight.baggage_info, flight.meal_info, flight.ticket_type, flight.price]):
+        with st.expander("📝 Additional Details"):
+            if flight.gate:
+                st.write(f"**Gate:** {flight.gate}")
+            if flight.terminal:
+                st.write(f"**Terminal:** {flight.terminal}")
+            if flight.baggage_info:
+                st.write(f"**Baggage:** {flight.baggage_info}")
+            if flight.meal_info:
+                st.write(f"**Meal:** {flight.meal_info}")
+            if flight.ticket_type:
+                st.write(f"**Class:** {flight.ticket_type}")
+            if flight.price:
+                st.write(f"**Price:** {flight.price}")
+    
+    # Show remarks and additional info if available
+    if flight.remarks:
+        st.write(f"**📋 Remarks:** {flight.remarks}")
+    
+    if flight.additional_info:
+        with st.expander("📄 Additional Info"):
+            st.text_area("Additional flight information:", flight.additional_info, height=100, disabled=True)
+
+def display_flight_results(result):
+    """Display flight extraction results"""
+    if not result or not result.flights:
+        st.error("❌ No flights found in the processed document")
+        return
+    
+    # Show processing summary
+    st.metric("📊 Flights Found", result.total_flights_found)
+    
+    # Display each flight
+    if len(result.flights) == 1:
+        display_single_flight(result.flights[0])
+    else:
+        for i, flight in enumerate(result.flights, 1):
+            with st.expander(f"Flight #{i} - {flight.flight_number or 'Unknown Flight'}", expanded=(i == 1)):
+                display_single_flight(flight, i)
+
 def display_single_booking(booking: BookingExtraction, booking_number: int = None):
     """Display a single booking in a clean format"""
     if booking_number:
@@ -240,7 +333,7 @@ def main():
     )
     
     # Header
-    st.title("🚗 FirstCars Demo Tool")
+    st.title("🚗 Demo Tool")
     st.markdown("**Intelligent Car Rental Booking Extraction from Email Content**")
     st.markdown("🎆 **Enhanced Features:** Multiple booking detection, relative date parsing (tomorrow, next Monday), smart city/vehicle mapping")
     st.markdown("---")
@@ -305,23 +398,51 @@ def main():
     except Exception as e:
         st.warning(f"⚠️ Word document processor initialization failed: {str(e)}")
     
+    # Initialize Flight processor
+    flight_processor = None
+    try:
+        from flight_document_processor import FlightDocumentProcessor
+        flight_processor = FlightDocumentProcessor(openai_api_key=api_key)
+        if hasattr(flight_processor, 'aws_available') and flight_processor.aws_available:
+            st.success("✈️ Flight Details Processing is available! (S3 + Textract + Flight AI)")
+        else:
+            st.warning("⚠️ Flight processor available but AWS not configured")
+            flight_processor = None
+    except ImportError as e:
+        st.warning(f"⚠️ Flight processing not available: Missing dependencies")
+    except Exception as e:
+        st.warning(f"⚠️ Flight processor initialization failed: {str(e)}")
+    
     # Create tabs based on available processors
     tabs_list = ["Email Processing"]
     if document_processor:
         tabs_list.append("Document Processing (S3+Textract)")
     if docx_processor:
         tabs_list.append("Word Document Processing")
+    if flight_processor:
+        tabs_list.append("Flight Details Processing")
     
     if len(tabs_list) > 1:
         tabs = st.tabs(tabs_list)
-        tab1 = tabs[0]
-        tab2 = tabs[1] if document_processor else None
-        tab3 = tabs[-1] if docx_processor else None  # Word doc tab is always last
+        tab1 = tabs[0]  # Email Processing
+        
+        # Assign tabs based on availability
+        tab_idx = 1
+        tab2 = tabs[tab_idx] if document_processor else None  # Document Processing
+        if document_processor:
+            tab_idx += 1
+        
+        tab3 = tabs[tab_idx] if docx_processor else None  # Word Document Processing  
+        if docx_processor:
+            tab_idx += 1
+            
+        tab4 = tabs[tab_idx] if flight_processor else None  # Flight Details Processing
     else:
         # Single email processing interface
         tab1 = st.container()
         tab2 = None
         tab3 = None
+        tab4 = None
 
     # Tab 1: Email Processing
     with tab1:
@@ -570,6 +691,62 @@ def main():
                                     st.error(f"❌ Save failed: {result_info}")
                             else:
                                 st.warning("⚠️ No bookings to save")
+
+    # Tab 4: Flight Details Processing (.pdf/.jpg/.png files for flight documents)
+    if flight_processor and tab4:
+        with tab4:
+            st.subheader("✈️ Flight Details Processing")
+            st.markdown("**Upload flight documents (PDFs, screenshots) for intelligent flight information extraction**")
+            
+            flight_files = st.file_uploader(
+                "Choose flight documents to upload:",
+                type=flight_processor.get_supported_file_types(),
+                accept_multiple_files=True,
+                help="Supported formats: PDF, Images (.jpg/.png/.gif) - Flight tickets, boarding passes, itineraries",
+                key="flight_uploader"
+            )
+            
+            if flight_files:
+                # Validate files
+                valid_flight_files = []
+                for uploaded_file in flight_files:
+                    is_valid, error_msg = flight_processor.validate_file(uploaded_file.name, len(uploaded_file.getvalue()))
+                    
+                    if is_valid:
+                        valid_flight_files.append((uploaded_file.getvalue(), uploaded_file.name))
+                        st.success(f"✅ {uploaded_file.name} - Ready for flight processing")
+                    else:
+                        st.error(f"❌ {uploaded_file.name}: {error_msg}")
+                
+                if valid_flight_files:
+                    if st.button("✈️ Process Flight Documents", type="primary", use_container_width=True, key="flight_process"):
+                        with st.spinner(f"✈️ Processing {len(valid_flight_files)} flight document(s) with S3 + Textract + Flight AI..."):
+                            try:
+                                flight_results = flight_processor.process_multiple_flight_documents(valid_flight_files)
+                                st.session_state.flight_results = flight_results
+                                st.session_state.flight_processing_done = True
+                            except Exception as e:
+                                st.error(f"❌ Flight document processing failed: {str(e)}")
+                                st.session_state.flight_results = None
+                                st.session_state.flight_processing_done = False
+            
+            # Display flight processing results
+            if st.session_state.get('flight_processing_done') and st.session_state.get('flight_results'):
+                st.markdown("### 📊 Flight Processing Results")
+                
+                total_flights = sum(len(r.flights) for r in st.session_state.flight_results)
+                st.info(f"✈️ Found {total_flights} total flight(s) from {len(st.session_state.flight_results)} document(s)")
+                
+                for i, result in enumerate(st.session_state.flight_results, 1):
+                    with st.expander(f"Document {i} Results ({len(result.flights)} flight(s))", expanded=(i == 1)):
+                        st.markdown(f"**Processing Method:** {result.extraction_method}")
+                        if result.processing_notes:
+                            st.markdown(f"**Notes:** {result.processing_notes}")
+                        
+                        display_flight_results(result)
+                
+                # Note: Flight details don't need Google Sheets integration for now
+                # Could be added later if needed for flight tracking
 
     # Footer with Google Sheets info
     st.markdown("---")
