@@ -106,6 +106,8 @@ class AppsScriptSheetsManager:
                     'passenger_name': booking.passenger_name,
                     'passenger_phone': booking.passenger_phone,
                     'passenger_email': booking.passenger_email,
+                    'additional_passengers': getattr(booking, 'additional_passengers', None),
+                    'multiple_pickup_locations': getattr(booking, 'multiple_pickup_locations', None),
                     'from_location': booking.from_location,
                     'to_location': booking.to_location,
                     'vehicle_group': booking.vehicle_group,
@@ -113,7 +115,6 @@ class AppsScriptSheetsManager:
                     'start_date': booking.start_date,
                     'end_date': booking.end_date,
                     'reporting_time': booking.reporting_time,
-                    'drop_time': booking.drop_time,
                     'start_from_garage': booking.start_from_garage,
                     'reporting_address': booking.reporting_address,
                     'drop_address': booking.drop_address,
@@ -123,6 +124,7 @@ class AppsScriptSheetsManager:
                     'price': booking.price,
                     'remarks': booking.remarks,
                     'labels': booking.labels,
+                    'additional_info': getattr(booking, 'additional_info', None),
                     'confidence_score': booking.confidence_score
                 }
                 bookings_data.append(booking_dict)
