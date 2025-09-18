@@ -1,0 +1,164 @@
+Corporate,"Source of bookings (Mail, Portal or Direct)",Booker involved or direct ,Approval Reqd (Yes or No),Duty Type (G2G or P2P)
+RELIANCE,Portal,Direct,No,P2P
+ACCENTURE,Portal,Direct,No,P2P
+ABBOTT,,,,
+CHEIL,,,,
+INDIA MEDTRONIC,Email,Direct,No,G2G
+JNJ,Email,Bookers and direct both,No,G2G
+TKM,,,,
+HYCLONE,Email,Direct,Yes,G2G
+CULVER MAX,Email,Bookers,No,G2G
+SHELL,Email,Bookers and direct both,No,G2G
+Ruder Finn,Email,Bookers,No,G2G
+VODAFONE,Email,Bookers,No,G2G
+INDIAN OIL,Email,Bookers,No,G2G
+CPPIB,Email,Bookers,No,G2G
+VIACOM,Email,Quest2travel portal mail,No,P2P
+STAR INDIA,Email,Star travel desk portal mail,Yes needed if guest sends direct bookings,G2G
+TOYOTA ENGINES,Email,Bookers,No,G2G
+RADIANCE,Email,Bookers,No,G2G
+Quest 2 Travel,Email,Quest2travel portal mail,No,G2G
+PIPELINE INFRA,Email,Pipeline Portal and bookers and guest,No,G2G
+FERRERO,Email,Bookers,No/If any changes in car type then approval needed,G2G
+OTG,Email,Direct,No,G2G
+HORIZON,Email,Bookers,No,G2G
+NIIFL,Email,Bookers,No,G2G
+RBI,Email,Bookers and direct both,No,G2G
+L&T Technology,Email,L&T Portal mail,No,G2G
+GALDERMA,Email,Booker,No,G2G
+IndiaFirst Life Insurance,Email,Booker,No,G2G
+RIYA TRAVELS,Email,Booker,No,G2G
+HMA TRAVEL,Email,Portal and Email,No,G2G
+UNICEF,Email,Bookers,No,G2G
+YES BANK,Email,Bookers,No,G2G
+ARCIL,Email,Bookers,No,G2G
+Tata Communications,Email,Bookers,No,G2G
+ICICI,Email,Quest2travel portal mail,No / If direct booking from guest then approval needed,G2G
+MAGMA,Email,Bookers,No,G2G
+JM Financial,Email,Bookers,No,G2G
+ESKO GRAPHICS,Email,Bookers,No,G2G
+CEPHEID,Email,Bookers,Yes,G2G
+JUST UDO,Email,Bookers,No,G2G
+LODHA GROUP,Email,Bookers,No,G2G
+HUNTSMAN,Email,Bookers,No,G2G
+Protean eGov,Email,Bookers,No,G2G
+BITSOM,Email,Bookers,No,G2G
+NTT INDIA,Email,Bookers,No,G2G
+Network 18,Email,Bookers,No,P2P
+DHR,Email,Bookers,No,G2G
+COZMO,Email,Bookers,No,G2G
+TEKTRONIX,Email,Bookers,No,G2G
+AVERY,Email,Bookers,No,G2G
+Aries Group,Email,Bookers,No,G2G
+M &M FINANCIAL,Email,Bookers,No,G2G
+WANHUA,Email,Bookers,No,G2G
+SPARK,Email,Bookers,No,G2G
+MILLIKEN,Email,Bookers,No,G2G
+MUFG,Email,Bookers,No,G2G
+INDIAN ELECTRICAL,Email,Bookers,No,G2G
+EMBASSY,Email,Bookers,No,G2G
+ENVIRON,Email,Bookers,No,G2G
+CAPRI GLOBAL,Email,Bookers,No,G2G
+DHRUV,Email,Bookers,No,G2G
+BOOK MY SHOW,Email,Bookers,No,G2G
+AAI HYDERABAD,Email,Bookers,No,G2G
+ACCION,Email,Bookers,No,G2G
+Total Energies,Email,Bookers,No,G2G
+BELDEN,Email,Bookers,No,G2G
+UTI Infrastructure,Email,Bookers,No,G2G
+BRISTLECONE,Email,Bookers,No,G2G
+PERFETTI,Email,Bookers,No,G2G
+PHOENIX ARC,Email,Bookers,No,G2G
+INDOSTAR,Email,Bookers,No,G2G
+NOBEL BIOCARE,Email,Bookers,No,G2G
+DBS BANK,Email,Bookers,No,G2G
+STRATA GEOSYSTEMS,Email,Bookers,No,G2G
+NETSCOUT,Email,Bookers,No,G2G
+JNTL KENVUE,Email,Bookers,No,G2G
+MOMENTUM,Email,Bookers,No,G2G
+UGRO,Email,Bookers,No,G2G
+ENTERO,Email,Bookers,No,G2G
+CMS IT,Email,Bookers,No,G2G
+PHILIP CAPITAL,Email,Bookers,No,G2G
+CASTROL,Email,Bookers,No,G2G
+PHARMAVEDA,Email,Direct,No,G2G
+Archroma,Email,Bookers,No,G2G
+LENOVO,Email,Bookers,No,G2G
+R AND M ELECTRICAL,Email,Bookers,No,G2G
+AEDIUM,Email,Bookers,No,G2G
+ALUFIT,Email,Bookers,No,G2G
+HDFC,Email,Bookers,No,G2G
+WELLA,Email,Bookers,No,G2G
+BVP,Email,Bookers,No,G2G
+VVF INDIA,Email,Bookers,No,G2G
+PORTESCAP,Email,Bookers,No,G2G
+BMT Consultants,Email,Bookers,No,G2G
+TVS CREDIT,Email,Bookers,No,G2G
+CMR GREEN,Email,Bookers,No,G2G
+LOCUZ,Email,Bookers,No,G2G
+VIDEOJET,Email,Bookers,No,G2G
+ATHER,Email,Bookers,No,G2G
+EQUINIX,Email,Bookers,No,G2G
+TUV,Email,Bookers,No,G2G
+BIRLASOFT,Email,Bookers,No,G2G
+EPULSE,Email,Bookers,No,G2G
+BALMER LAWRIE,Email,Bookers,No,G2G
+Jade Life,Email,Bookers,No,G2G
+GILBERT TWEED,Email,Bookers,No,G2G
+KOTAK,Email,Bookers,No,G2G
+JHPIEGO,Email,Direct,No,G2G
+ROCHE,Email,Bookers,No/ PO needed,G2G
+MULTI COMMODITY,Email,Bookers,No,G2G
+Foxtrot,Email,Bookers,No,G2G
+FORVOL,Email,Bookers,No,G2G
+SAARATHI FINANCE,Email,Bookers,No,G2G
+VIJAYSHRI,Email,Bookers,No,G2G
+PNG,Email,Bookers,No,G2G
+PRABHAKAR BHAGWAT,Email,Bookers,No,G2G
+FORTIVE,Email,Bookers,No,G2G
+MK EXPRESS,Email,Bookers,No,G2G
+NSE,Email,Bookers,No,G2G
+FUJITSU,Email,Bookers,No,G2G
+COMMUNICATE INDIA,Email,Bookers,No,G2G
+PUMA,Email,Bookers,No,G2G
+AMICUS,Email,Bookers,No,G2G
+ICAI MUMBAI,Email,Bookers,No,G2G
+ABP NETWORK,Email,Bookers,No,P2P
+MAHINDRA & MAHINDRA FINANCIAL,Email,Bookers,No,G2G
+EVONIK,Email,Bookers,No,G2G
+MARRIOTT,Email,Bookers,No,G2G
+BLUEDART MUMBAI,Email,Bookers,No,G2G
+RAMCO,Email,Bookers,No,G2G
+TRAVELLO,Email,Bookers,No,G2G
+RBA,Email,Bookers,No,G2G
+OSCOTEL,Email,Bookers,No,G2G
+MASTECH DIGITAL,Email,Bookers,No,G2G
+Hindustantimes,Email,Bookers,No,G2G
+Mathisys,Email,Bookers,No,G2G
+ADVANSYS,Email,Bookers,No,G2G
+MECON,Email,Bookers,No,G2G
+AZELIS,Email,Bookers,No,G2G
+ACCORD,Email,Bookers,No,G2G
+Thomas Cook Viacom18,Email,Quest2travel portal mail,No,P2P
+MINT,Email,Bookers,No,G2G
+NETWORK INTELLIGENCE,Email,Bookers,No,G2G
+AKZO NOBEL,Email,Bookers,No,G2G
+TRAFIGURA,Email,Bookers,No,G2G
+SACE,Email,Bookers,No,G2G
+GODREJ AND BOYCE,Email,Bookers,No,G2G
+GILBARCO,Email,Bookers,No,G2G
+GULF OIL,Email,Bookers,No,G2G
+SHREE PLAN YOUR JOURNEY,Email,Bookers,No,G2G
+HDB FINANCIAL,Email,Bookers,No,G2G
+SMARSH,Email,Bookers,No,G2G
+PETROMECH,Email,Bookers,No,G2G
+KARKINOS HEALTHCARE,Email,Bookers,No,G2G
+STANDARD,Email,Bookers,No,G2G
+A T E ENTERPRISES,Email,Quest2travel portal mail,No,G2G
+ALTUM,Email,,,G2G
+HUHTAMAKI,Email,Quest2travel portal mail,No,G2G
+NAVITAS,Email,Bookers,No,G2G
+STT GLOBAL,Email,Bookers,No,G2G
+ALVAREZ,Email,Bookers,No,G2G
+GLOBALPAY,Email,Bookers,No,G2G
+Institute of Chartered Accountants,Email,Bookers,No,G2G

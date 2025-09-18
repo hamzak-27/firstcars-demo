@@ -264,7 +264,17 @@ def display_single_booking(booking: BookingExtraction, booking_number: int = Non
         # Display multiple pickup locations if present
         if hasattr(booking, 'multiple_pickup_locations') and booking.multiple_pickup_locations:
             st.write(f"**Additional Pickups:** {booking.multiple_pickup_locations}")
-        if booking.drop_address:
+        
+        # Display multiple drops
+        drops = []
+        for i in range(1, 6):
+            drop_field = f"drop{i}"
+            if hasattr(booking, drop_field) and getattr(booking, drop_field):
+                drops.append(f"**Drop {i}:** {getattr(booking, drop_field)}")
+        if drops:
+            for drop_info in drops:
+                st.write(drop_info)
+        elif booking.drop_address:
             st.write(f"**Drop Address:** {booking.drop_address}")
         
         st.markdown("**ℹ️ Additional Information**")
@@ -272,8 +282,21 @@ def display_single_booking(booking: BookingExtraction, booking_number: int = Non
             st.write(f"**Flight/Train:** {booking.flight_train_number}")
         if booking.duty_type:
             st.write(f"**Duty Type:** {booking.duty_type}")
-        if booking.price:
-            st.write(f"**Price:** {booking.price}")
+        
+        # Display corporate information
+        if hasattr(booking, 'corporate_duty_type') and booking.corporate_duty_type:
+            st.write(f"**Corporate Duty Type:** {booking.corporate_duty_type}")
+        if hasattr(booking, 'recommended_package') and booking.recommended_package:
+            if booking.recommended_package == "Approval Required":
+                st.warning(f"**📋 Package:** {booking.recommended_package}")
+            else:
+                st.success(f"**📦 Recommended Package:** {booking.recommended_package}")
+        if hasattr(booking, 'approval_required') and booking.approval_required:
+            if booking.approval_required.lower() == 'yes':
+                st.warning(f"**⚠️ Approval Required:** {booking.approval_required}")
+            else:
+                st.info(f"**✅ Approval Required:** {booking.approval_required}")
+        
         if booking.remarks:
             st.write(f"**Remarks:** {booking.remarks}")
     
@@ -607,38 +630,61 @@ def main():
     if docx_processor and tab3:
         with tab3:
             st.subheader("📄 Word Document Processing")
-            st.markdown("**Upload .docx files for intelligent booking extraction using python-docx**")
+            st.markdown("**Upload .docx or .doc files for intelligent booking extraction**")
             
             docx_files = st.file_uploader(
-                "Choose .docx files to upload:",
-                type=['docx'],
+                "Choose Word files to upload:",
+                type=['docx', 'doc'],
                 accept_multiple_files=True,
-                help="Supported format: Microsoft Word documents (.docx only)",
+                help="Supported formats: Microsoft Word documents (.docx recommended, .doc supported via Textract if configured)",
                 key="docx_uploader"
             )
             
             if docx_files:
                 # Validate files
                 valid_docx_files = []
+                valid_doc_files = []
                 for uploaded_file in docx_files:
-                    is_valid, error_msg = docx_processor.validate_file(uploaded_file.name, len(uploaded_file.getvalue()))
-                    
-                    if is_valid:
-                        valid_docx_files.append((uploaded_file.getvalue(), uploaded_file.name))
-                        st.success(f"✅ {uploaded_file.name} - Ready for processing")
+                    name_lower = uploaded_file.name.lower()
+                    size = len(uploaded_file.getvalue())
+                    if name_lower.endswith('.docx'):
+                        is_valid, error_msg = docx_processor.validate_file(uploaded_file.name, size)
+                        if is_valid:
+                            valid_docx_files.append((uploaded_file.getvalue(), uploaded_file.name))
+                            st.success(f"✅ {uploaded_file.name} - Ready for DOCX processing")
+                        else:
+                            st.error(f"❌ {uploaded_file.name}: {error_msg}")
+                    elif name_lower.endswith('.doc'):
+                        if document_processor:
+                            is_valid, error_msg = document_processor.validate_file(uploaded_file.name, size)
+                            if is_valid:
+                                valid_doc_files.append((uploaded_file.getvalue(), uploaded_file.name))
+                                st.success(f"✅ {uploaded_file.name} - Ready for DOC processing (Textract)")
+                            else:
+                                st.error(f"❌ {uploaded_file.name}: {error_msg}")
+                        else:
+                            st.error(f"❌ {uploaded_file.name}: .doc support requires Document Processing (S3 + Textract) to be configured")
                     else:
-                        st.error(f"❌ {uploaded_file.name}: {error_msg}")
+                        st.error(f"❌ {uploaded_file.name}: Unsupported Word file type")
                 
-                if valid_docx_files:
+                if valid_docx_files or valid_doc_files:
                     if st.button("🔍 Process Word Documents", type="primary", use_container_width=True, key="docx_process"):
-                        with st.spinner(f"📄 Processing {len(valid_docx_files)} Word document(s) with python-docx + AI..."):
+                        total_to_process = len(valid_docx_files) + len(valid_doc_files)
+                        spinner_msg = f"📄 Processing {total_to_process} Word document(s)"
+                        with st.spinner(spinner_msg + "..."):
                             try:
-                                docx_results = []
+                                all_results = []
+                                # Process DOCX with python-docx processor
                                 for file_content, filename in valid_docx_files:
                                     result = docx_processor.process_document(file_content, filename)
-                                    docx_results.append(result)
+                                    all_results.append(result)
+                                # Process DOC via Textract if available
+                                if valid_doc_files and document_processor:
+                                    for file_content, filename in valid_doc_files:
+                                        result = document_processor.process_document(file_content, filename, file_type='doc')
+                                        all_results.append(result)
                                 
-                                st.session_state.docx_results = docx_results
+                                st.session_state.docx_results = all_results
                                 st.session_state.docx_processing_done = True
                             except Exception as e:
                                 st.error(f"❌ Word document processing failed: {str(e)}")

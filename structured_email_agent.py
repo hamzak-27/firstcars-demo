@@ -84,7 +84,24 @@ class StructuredEmailAgent(CarRentalAIAgent):
         """Use GPT-4o to analyze structured email content and extract multiple bookings"""
         
         user_prompt = f"""
-Please analyze this structured email content and extract ALL booking information. This email may contain:
+Please analyze this structured email content and extract ALL booking information with comprehensive analysis.
+
+MULTIPLE BOOKING DETECTION:
+- Each row in a table typically represents ONE separate booking
+- Multiple dates mentioned = separate bookings (17th & 18th Sept = 2 bookings)
+- Different passengers on different dates = separate bookings
+- Round trips with overnight stays = separate outbound & return bookings
+- Multi-day requirements = separate booking per day
+
+COMPREHENSIVE DATA EXTRACTION (ZERO LOSS POLICY):
+- Extract EVERY piece of information - nothing should be lost
+- Driver names, contact numbers, special instructions, VIP requirements
+- Corporate details, billing information, payment methods
+- Vehicle preferences, cleanliness requirements, timing flexibility
+- Emergency contacts, alternate numbers, backup arrangements
+- If data doesn't fit standard fields, put in 'remarks' or 'additional_info'
+
+Structured content may contain:
 - Tables with multiple booking rows
 - Tables with booking information in columns  
 - Mixed formats with multiple bookings
@@ -114,12 +131,19 @@ Please provide your analysis in this EXACT JSON format:
             "booked_by_name": "booker name or null",
             "booked_by_phone": "booker phone or null", 
             "booked_by_email": "booker email or null",
-            "passenger_name": "passenger name or null",
-            "passenger_phone": "passenger phone (10 digits) or null",
-            "passenger_email": "passenger email or null",
-            "from_location": "source location/city or null",
-            "to_location": "destination location/city or null", 
-            "vehicle_group": "vehicle type or null",
+            "passenger_name": "primary passenger name or null",
+            "passenger_phone": "primary passenger phone (10 digits) or null",
+            "passenger_email": "primary passenger email or null",
+            "additional_passengers": "other passenger names (comma-separated) or null",
+            "multiple_pickup_locations": "multiple pickup addresses (comma-separated) or null",
+            "from_location": "source CITY NAME ONLY or null",
+            "to_location": "destination CITY NAME ONLY or null",
+            "drop1": "first drop CITY NAME or null",
+            "drop2": "second drop CITY NAME or null",
+            "drop3": "third drop CITY NAME or null",
+            "drop4": "fourth drop CITY NAME or null",
+            "drop5": "fifth drop CITY NAME or null", 
+            "vehicle_group": "standardized vehicle name or null (leave null if not mentioned - system will default to Dzire)",
             "duty_type": "duty type or null",
             "start_date": "YYYY-MM-DD format or null",
             "end_date": "YYYY-MM-DD format or null",
@@ -130,8 +154,7 @@ Please provide your analysis in this EXACT JSON format:
             "flight_train_number": "flight/train number or null",
             "dispatch_center": "dispatch info or null",
             "bill_to": "billing entity or null",
-            "price": "price info or null",
-            "remarks": "special instructions/notes or null",
+            "remarks": "ONLY booking-related special instructions/notes (exclude greetings, signatures) or null",
             "labels": "any labels or null",
             "additional_info": "any other relevant information or null"
         }}
@@ -217,6 +240,12 @@ Return ONLY valid JSON, no additional text.
                 
                 # Create BookingExtraction object
                 booking = BookingExtraction(**processed_data)
+                
+                # Apply business rules (need to get email content from parent)
+                # For now, apply basic rules without email content
+                if not booking.vehicle_group or booking.vehicle_group.strip() == "":
+                    booking.vehicle_group = "Dzire"
+                
                 bookings.append(booking)
                 
             except Exception as e:
@@ -240,12 +269,16 @@ STRUCTURED DATA ANALYSIS:
 3. Detecting when data represents multiple separate bookings vs single booking
 4. Extracting consistent information across different structured formats
 
-MULTI-BOOKING DETECTION RULES:
+ENHANCED MULTI-BOOKING DETECTION RULES:
 1. Each row in a booking table typically represents ONE separate booking
-2. Each column might represent ONE booking in some formats
-3. Some tables mix information - use context to determine booking boundaries
-4. Common booking indicators: different passenger names, different dates/times, different destinations
-5. Shared information (like company name) may apply to multiple bookings
+2. Multiple DATES mentioned = separate bookings (17th & 18th Sept = 2 bookings)
+3. Different passengers on different dates = separate bookings
+4. Round trips with overnight stays = separate outbound & return bookings  
+5. Multi-day requirements = separate booking per day
+6. Each column might represent ONE booking in some formats
+7. Common booking indicators: different passenger names, different dates/times, different destinations
+8. Shared information (like company name) may apply to multiple bookings
+9. ZERO DATA LOSS: Extract all information - use remarks for unmapped data
 
 IMPORTANT PROCESSING RULES:
 1. Always think step-by-step about the table structure first
@@ -256,12 +289,15 @@ IMPORTANT PROCESSING RULES:
 6. Provide high confidence scores for well-structured data
 
 DATA STANDARDIZATION:
-- Vehicle names: Map to standard types (e.g., "Dzire" → "Swift Dzire")
-- City names: Use location mapping for consistency  
+- Vehicle names: Map to standard types (e.g., "Dzire" → "Swift Dzire", "Innova" → "Innova Crysta")
+- City names: CITY NAMES ONLY in from/to/drop fields (Jogeshwari → Mumbai)
 - Phone numbers: Clean to 10 digits (remove +91, spaces, hyphens)
 - Dates: Convert to YYYY-MM-DD format
-- Times: Convert to HH:MM 24-hour format and round to 15-minute intervals
-- Addresses: Extract city names for from/to locations
+- Times: Convert to HH:MM 24-hour format (exact times, no rounding in extraction)
+- Multiple drops: Extract as drop1, drop2, drop3, drop4, drop5
+- Default vehicle: Leave null if not mentioned (system defaults to 'Dzire')
+- No price extraction: Do NOT extract any cost/price information
+- Filter remarks: Only booking-related instructions (exclude greetings, signatures)
 
 TABLE ANALYSIS APPROACH:
 1. First, identify table headers and structure

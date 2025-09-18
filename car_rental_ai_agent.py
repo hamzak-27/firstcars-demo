@@ -40,18 +40,28 @@ class BookingExtraction:
     multiple_pickup_locations: Optional[str] = None  # Multiple pickup addresses (comma-separated)
     from_location: Optional[str] = None
     to_location: Optional[str] = None
+    # Multiple drop locations
+    drop1: Optional[str] = None  # Primary drop location
+    drop2: Optional[str] = None  # Second drop location
+    drop3: Optional[str] = None  # Third drop location
+    drop4: Optional[str] = None  # Fourth drop location
+    drop5: Optional[str] = None  # Fifth drop location
     vehicle_group: Optional[str] = None
     duty_type: Optional[str] = None
+    # Corporate features
+    corporate_duty_type: Optional[str] = None  # G2G or P2P based on corporate mapping
+    recommended_package: Optional[str] = None  # Recommended package (G-04HR 40KMS, etc.)
+    approval_required: Optional[str] = None  # Yes/No based on corporate CSV
     start_date: Optional[str] = None
     end_date: Optional[str] = None
     reporting_time: Optional[str] = None
     start_from_garage: Optional[str] = None
     reporting_address: Optional[str] = None
-    drop_address: Optional[str] = None
+    drop_address: Optional[str] = None  # Keep for backward compatibility
     flight_train_number: Optional[str] = None
     dispatch_center: Optional[str] = None
     bill_to: Optional[str] = None
-    price: Optional[str] = None
+    # Removed price field as per requirements
     remarks: Optional[str] = None
     labels: Optional[str] = None
     additional_info: Optional[str] = None
@@ -76,18 +86,25 @@ class BookingExtraction:
             self.multiple_pickup_locations or "",
             self.from_location or "",
             self.to_location or "",
+            self.drop1 or "",
+            self.drop2 or "",
+            self.drop3 or "",
+            self.drop4 or "",
+            self.drop5 or "",
             self.vehicle_group or "",
             self.duty_type or "",
+            self.corporate_duty_type or "",
+            self.recommended_package or "",
+            self.approval_required or "",
             self.start_date or "",
             self.end_date or "",
             self.reporting_time or "",
             self.start_from_garage or "",
             self.reporting_address or "",
-            self.drop_address or "",
+            self.drop_address or "",  # Keep for backward compatibility
             self.flight_train_number or "",
             self.dispatch_center or "",
             self.bill_to or "",
-            self.price or "",
             self.remarks or "",
             self.labels or "",
             self.additional_info or ""
@@ -156,17 +173,179 @@ class CarRentalAIAgent:
             'december': '12', 'dec': '12'
         }
         
-        # Load city and vehicle mappings
+        # Load city, vehicle, and corporate mappings
         self.city_mappings = self._load_city_mappings()
         self.vehicle_mappings_csv = self._load_vehicle_mappings()
+        self.corporate_mappings = self._load_corporate_mappings()
+        
+        # Comprehensive suburb-to-city mapping for major Indian cities
+        self.suburb_city_mappings = {
+            # Mumbai suburbs
+            'jogeshwari': 'Mumbai',
+            'andheri': 'Mumbai',
+            'bandra': 'Mumbai',
+            'kurla': 'Mumbai',
+            'powai': 'Mumbai',
+            'goregaon': 'Mumbai',
+            'malad': 'Mumbai',
+            'borivali': 'Mumbai',
+            'kandivali': 'Mumbai',
+            'dahisar': 'Mumbai',
+            'chembur': 'Mumbai',
+            'ghatkopar': 'Mumbai',
+            'vikhroli': 'Mumbai',
+            'kanjurmarg': 'Mumbai',
+            'mulund': 'Mumbai',
+            'thane': 'Mumbai',
+            'navi mumbai': 'Mumbai',
+            'vashi': 'Mumbai',
+            'nerul': 'Mumbai',
+            'panvel': 'Mumbai',
+            'kalyan': 'Mumbai',
+            'dombivli': 'Mumbai',
+            'bhiwandi': 'Mumbai',
+            'ulhasnagar': 'Mumbai',
+            
+            # Delhi suburbs
+            'gurgaon': 'Delhi',
+            'gurugram': 'Delhi',
+            'noida': 'Delhi',
+            'greater noida': 'Delhi',
+            'faridabad': 'Delhi',
+            'ghaziabad': 'Delhi',
+            'dwarka': 'Delhi',
+            'rohini': 'Delhi',
+            'janakpuri': 'Delhi',
+            'lajpat nagar': 'Delhi',
+            'karol bagh': 'Delhi',
+            'connaught place': 'Delhi',
+            'cp': 'Delhi',
+            'saket': 'Delhi',
+            'vasant kunj': 'Delhi',
+            'vasant vihar': 'Delhi',
+            'defence colony': 'Delhi',
+            'greater kailash': 'Delhi',
+            'south extension': 'Delhi',
+            'laxmi nagar': 'Delhi',
+            'pitampura': 'Delhi',
+            'preet vihar': 'Delhi',
+            
+            # Bangalore suburbs
+            'whitefield': 'Bangalore',
+            'electronic city': 'Bangalore',
+            'koramangala': 'Bangalore',
+            'indiranagar': 'Bangalore',
+            'jayanagar': 'Bangalore',
+            'btm layout': 'Bangalore',
+            'hsr layout': 'Bangalore',
+            'marathahalli': 'Bangalore',
+            'sarjapur': 'Bangalore',
+            'hebbal': 'Bangalore',
+            'yelahanka': 'Bangalore',
+            'banashankari': 'Bangalore',
+            'rajajinagar': 'Bangalore',
+            'malleshwaram': 'Bangalore',
+            'jp nagar': 'Bangalore',
+            'basavanagudi': 'Bangalore',
+            'vijayanagar': 'Bangalore',
+            
+            # Chennai suburbs  
+            'ambattur': 'Chennai',
+            'tambaram': 'Chennai',
+            'chrompet': 'Chennai',
+            'adyar': 'Chennai',
+            'velachery': 'Chennai',
+            'porur': 'Chennai',
+            'anna nagar': 'Chennai',
+            't nagar': 'Chennai',
+            'nungambakkam': 'Chennai',
+            'mylapore': 'Chennai',
+            'guindy': 'Chennai',
+            'omr': 'Chennai',
+            'ecr': 'Chennai',
+            'thoraipakkam': 'Chennai',
+            'perungudi': 'Chennai',
+            'sholinganallur': 'Chennai',
+            'pallikaranai': 'Chennai',
+            
+            # Hyderabad suburbs
+            'hitech city': 'Hyderabad',
+            'gachibowli': 'Hyderabad',
+            'madhapur': 'Hyderabad',
+            'kondapur': 'Hyderabad',
+            'jubilee hills': 'Hyderabad',
+            'banjara hills': 'Hyderabad',
+            'secunderabad': 'Hyderabad',
+            'miyapur': 'Hyderabad',
+            'kukatpally': 'Hyderabad',
+            'ameerpet': 'Hyderabad',
+            'begumpet': 'Hyderabad',
+            'somajiguda': 'Hyderabad',
+            'abids': 'Hyderabad',
+            'koti': 'Hyderabad',
+            'dilsukhnagar': 'Hyderabad',
+            'lb nagar': 'Hyderabad',
+            
+            # Pune suburbs
+            'hinjewadi': 'Pune',
+            'wakad': 'Pune',
+            'baner': 'Pune',
+            'aundh': 'Pune',
+            'kharadi': 'Pune',
+            'viman nagar': 'Pune',
+            'koregaon park': 'Pune',
+            'camp': 'Pune',
+            'shivajinagar': 'Pune',
+            'deccan': 'Pune',
+            'kothrud': 'Pune',
+            'warje': 'Pune',
+            'karve nagar': 'Pune',
+            'magarpatta': 'Pune',
+            'hadapsar': 'Pune',
+            
+            # Kolkata suburbs
+            'salt lake': 'Kolkata',
+            'park street': 'Kolkata',
+            'ballygunge': 'Kolkata',
+            'howrah': 'Kolkata',
+            'dumdum': 'Kolkata',
+            'behala': 'Kolkata',
+            'tollygunge': 'Kolkata',
+            'jadavpur': 'Kolkata',
+            'gariahat': 'Kolkata',
+            'esplanade': 'Kolkata',
+            'sealdah': 'Kolkata',
+            
+            # Ahmedabad suburbs
+            'sg highway': 'Ahmedabad',
+            'bopal': 'Ahmedabad',
+            'satellite': 'Ahmedabad',
+            'vastrapur': 'Ahmedabad',
+            'naranpura': 'Ahmedabad',
+            'ellis bridge': 'Ahmedabad',
+            'cg road': 'Ahmedabad',
+            'paldi': 'Ahmedabad',
+            'navrangpura': 'Ahmedabad',
+            'maninagar': 'Ahmedabad',
+            
+            # Other major cities
+            'kochi': 'Cochin',
+            'ernakulam': 'Cochin',
+            'chembumukku': 'Cochin',
+            'mather berrywoods': 'Cochin',
+            'kadavanthra': 'Cochin',
+            'edapally': 'Cochin',
+            'mg road': 'Cochin'
+        }
     
     def _normalize_time_to_15min_intervals(self, time_str: str) -> str:
         """
-        Normalize time to 15-minute intervals based on business rules:
-        - 7:00-7:14 → 7:00
-        - 7:15-7:29 → 7:15  
-        - 7:30-7:44 → 7:30
-        - 7:45-7:59 → 7:45
+        Normalize time to 15-minute intervals based on enhanced business rules:
+        - 0-7 minutes → round down (7:10 → 7:00, 7:07 → 7:00)
+        - 8-22 minutes → round to :15 (7:15 → 7:15, 7:10 → 7:00)
+        - 23-37 minutes → round to :30 (7:30 → 7:30, 7:25 → 7:15)
+        - 38-52 minutes → round to :45 (7:45 → 7:45, 7:43 → 7:30)
+        - 53-59 minutes → round down to :45 (7:53 → 7:45)
         """
         if not time_str:
             return time_str
@@ -181,14 +360,25 @@ class CarRentalAIAgent:
             hour = int(time_match.group(1))
             minute = int(time_match.group(2))
             
-            # Normalize minutes to 15-minute intervals
-            if minute < 15:
+            # Enhanced 15-minute interval logic based on requirements
+            if minute <= 7:        # 0-7 → :00 (7:10 → 7:00, 7:07 → 7:00)
                 normalized_minute = 0
-            elif minute < 30:
-                normalized_minute = 15
-            elif minute < 45:
-                normalized_minute = 30
-            else:
+            elif minute <= 22:     # 8-22 → :15 or :00 (7:10 → 7:00, 7:15 → 7:15)
+                if minute <= 10:   # Special case: 7:10 → 7:00
+                    normalized_minute = 0
+                else:
+                    normalized_minute = 15
+            elif minute <= 37:     # 23-37 → :30 or :15
+                if minute <= 25:   # 25 and below → :15
+                    normalized_minute = 15
+                else:
+                    normalized_minute = 30
+            elif minute <= 52:     # 38-52 → :45 or :30
+                if minute <= 43:   # 43 and below (like 7:43) → :30
+                    normalized_minute = 30
+                else:
+                    normalized_minute = 45
+            else:                  # 53-59 → :45 (7:53 → 7:45)
                 normalized_minute = 45
                 
             # Format as HH:MM
@@ -198,19 +388,20 @@ class CarRentalAIAgent:
             logger.warning(f"Could not normalize time '{time_str}': {e}")
             return time_str
     
-    def _apply_business_rules(self, booking: BookingExtraction) -> BookingExtraction:
+    def _apply_business_rules(self, booking: BookingExtraction, email_content: str = "") -> BookingExtraction:
         """
-        Apply business rules to extracted booking data
+        Apply enhanced business rules to extracted booking data
         """
-        # Rule 1: Toyota Innova -> Innova Crysta (already handled in vehicle mappings)
+        # Rule 1: Default vehicle to 'Dzire' if not specified
+        if not booking.vehicle_group or booking.vehicle_group.strip() == "":
+            booking.vehicle_group = "Dzire"
         
-        # Rule 2: Round trip drop city logic (Mumbai to Daman and back to Mumbai = drop Mumbai)
+        # Rule 2: Round trip drop city logic (Bangalore to Mysore and back to Bangalore = drop Bangalore)
         if booking.from_location and booking.to_location:
-            # Check for round trip patterns
             from_loc = booking.from_location.lower()
             to_loc = booking.to_location.lower()
             
-            # Look for "and back to" patterns in additional_info or remarks
+            # Look for round trip patterns in additional_info or remarks
             combined_text = f"{booking.additional_info or ''} {booking.remarks or ''}".lower()
             
             if "back to" in combined_text or "return to" in combined_text:
@@ -218,15 +409,76 @@ class CarRentalAIAgent:
                 back_match = re.search(r'(?:back to|return to)\s+([^\s,\.]+)', combined_text)
                 if back_match:
                     return_city = back_match.group(1).strip()
-                    # If it matches the from_location, set it as drop
+                    # If return city matches origin, set final drop as origin city
                     if return_city in from_loc or from_loc in return_city:
-                        booking.to_location = booking.from_location
+                        booking.drop1 = booking.from_location  # Final drop is origin
+                        if booking.to_location != booking.from_location:
+                            # If there's an intermediate stop, keep it in to_location
+                            pass
         
-        # Rule 3: Time precision with 15-minute intervals
+        # Rule 3: Intra-city logic - if mentioned as intra-city, from and to should be same
+        combined_text = f"{booking.additional_info or ''} {booking.remarks or ''} {booking.duty_type or ''}".lower()
+        intra_city_keywords = ['intra-city', 'within city', 'same city', 'local use', 'city trip']
+        if any(keyword in combined_text for keyword in intra_city_keywords):
+            if booking.from_location and not booking.to_location:
+                booking.to_location = booking.from_location
+            elif booking.to_location and not booking.from_location:
+                booking.from_location = booking.to_location
+        
+        # Rule 4: Time precision with 15-minute intervals
         if booking.reporting_time:
             booking.reporting_time = self._normalize_time_to_15min_intervals(booking.reporting_time)
         
+        # Rule 5: Filter special instructions (remove greetings, signatures)
+        if booking.remarks:
+            booking.remarks = self._filter_relevant_instructions(booking.remarks)
+        
+        # Rule 6: Apply corporate logic
+        booking = self._apply_corporate_logic(booking, email_content)
+        
         return booking
+    
+    def _filter_relevant_instructions(self, remarks: str) -> str:
+        """Filter out irrelevant content from remarks, keeping only booking-related instructions"""
+        if not remarks:
+            return remarks
+            
+        lines = remarks.split('\n')
+        relevant_lines = []
+        
+        # Keywords to exclude (greetings, signatures, etc.)
+        exclude_keywords = [
+            'regards', 'best regards', 'warm regards', 'kind regards',
+            'hello', 'hi', 'dear', 'thanks', 'thank you', 'sincerely',
+            'yours', 'faithfully', 'cheers', 'have a', 'good day',
+            'please let me know', 'feel free', 'contact me'
+        ]
+        
+        # Keywords to include (booking-related)
+        include_keywords = [
+            'driver', 'car', 'vehicle', 'pickup', 'drop', 'time', 'address',
+            'clean', 'neat', 'punctual', 'contact', 'mobile', 'phone',
+            'special', 'requirement', 'instruction', 'note', 'important',
+            'guest', 'passenger', 'luggage', 'baggage', 'route', 'toll'
+        ]
+        
+        for line in lines:
+            line_lower = line.lower().strip()
+            if not line_lower:
+                continue
+                
+            # Skip lines that are just greetings/signatures
+            if any(exclude in line_lower for exclude in exclude_keywords) and \
+               not any(include in line_lower for include in include_keywords):
+                continue
+                
+            # Skip very short lines that are likely greetings
+            if len(line_lower) < 10 and not any(include in line_lower for include in include_keywords):
+                continue
+                
+            relevant_lines.append(line.strip())
+        
+        return '\n'.join(relevant_lines).strip()
     
     def extract_booking_data(self, email_content: str, sender_email: str = None) -> BookingExtraction:
         """
@@ -298,16 +550,58 @@ class CarRentalAIAgent:
         current_date_str = current_date.strftime('%Y-%m-%d')
         current_day_name = current_date.strftime('%A')
         
-        system_prompt = f"""You are an expert AI agent specialized in extracting car rental booking information from unstructured emails. You must identify ALL separate bookings and extract comprehensive details.
+        system_prompt = f"""You are an expert AI agent specialized in extracting car rental booking information from unstructured emails. You must identify ALL separate bookings and extract comprehensive details with ZERO data loss.
 
 CRITICAL BUSINESS RULES:
-1. MULTIPLE BOOKINGS: Analyze for multiple separate bookings (different dates/passengers/locations)
-2. VEHICLE STANDARDIZATION: Toyota Innova/Innova → Innova Crysta (MANDATORY)
-3. ROUND TRIP LOGIC: If route is "Mumbai to Daman and back to Mumbai" → drop city = Mumbai  
-4. TIME PRECISION: Use exact times - do NOT round (7:10 stays 7:10, not 7:15)
-5. COMPREHENSIVE REMARKS: Extract ALL details - driver preferences, special instructions, contact numbers
-6. MULTIPLE PASSENGERS: Capture all passenger names if multiple mentioned
-7. MULTIPLE PICKUPS: Capture all pickup locations if multiple mentioned
+1. MULTIPLE BOOKINGS ANALYSIS: 
+   - Analyze for multiple SEPARATE bookings (different dates/times/passengers/routes)
+   - Each unique DATE requires a separate booking (17th & 18th Sept = 2 bookings)
+   - Different pickup/drop times on same day = separate bookings if different passengers
+   - Round trips with overnight stay = 2 separate bookings (outbound + return)
+   - Multi-day requirements = separate booking per day
+   - Example: "Car for 17th & 18th Sept" = 2 bookings, not 1
+
+2. COMPREHENSIVE DATA EXTRACTION (ZERO LOSS POLICY):
+   - Extract EVERY piece of information from the email
+   - If data doesn't fit standard fields, put it in 'remarks' or 'additional_info'
+   - Driver names, contact numbers, special preferences, cleanliness requirements
+   - VIP instructions, billing details, payment methods, corporate contacts
+   - Vehicle preferences, alternate contact numbers, emergency contacts
+   - Route variations, timing flexibility, special equipment needs
+
+3. MULTIPLE DROP LOCATIONS:
+   - Extract ALL drop locations separately as drop1, drop2, drop3, drop4, drop5
+   - Example: "Pick from A, drop at B, then C, finally D" = drop1: B, drop2: C, drop3: D
+   - For round trips: "Mumbai to Pune and back to Mumbai" = drop1: Mumbai (final destination)
+
+4. ENHANCED BUSINESS LOGIC:
+   - VEHICLE DEFAULT: If no vehicle mentioned, DO NOT extract any vehicle (system will default to 'Dzire')
+   - ROUND TRIP LOGIC: "Bangalore to Mysore and back to Bangalore" = drop1 should be Bangalore
+   - CITY NAMES ONLY: from_location and to_location must contain ONLY city names, not full addresses
+   - INTRA-CITY: If mentioned as "intra-city", "within city", "local use" - from and to should be same city
+   - NO PRICE EXTRACTION: Do NOT extract any price/cost information
+
+5. MULTIPLE PASSENGERS CLARIFICATION:
+   - Multiple passenger names = ONE booking with multiple people, NOT separate bookings
+   - Put primary passenger in 'passenger_name', others in 'additional_passengers'
+   - Example: "John and Mary traveling" = passenger_name: John, additional_passengers: Mary
+
+6. SPECIAL INSTRUCTIONS FILTERING:
+   - Extract ONLY booking-related instructions in remarks
+   - EXCLUDE: greetings (hello, hi), signatures (regards, thanks), pleasantries
+   - INCLUDE: driver instructions, vehicle requirements, timing notes, special needs
+
+7. CORPORATE COMPANY DETECTION:
+   - Identify company names from email signatures, domains, or content
+   - Look for corporate entities that might be in our database
+   - Extract company names accurately for corporate duty type mapping
+
+8. STANDARDIZATION RULES:
+   - Vehicle names: Toyota Innova/Innova → Innova Crysta (MANDATORY)
+   - City names: Suburb → City (Jogeshwari → Mumbai, Andheri → Mumbai)
+   - Time precision: Extract exact times (7:43, 7:10, 7:53) - no rounding
+   - Phone numbers: Clean format (10 digits)
+   - Addresses: Full addresses in reporting_address/drop_address, cities only in from/to_location
 
 CRITICAL DATE FORMAT:
 - Input dates are in DD/MM/YYYY format (e.g., 27/08/2025 = 27th August 2025)
@@ -336,12 +630,31 @@ REMARKS EXTRACTION:
 - Note any VIP/special guest requirements"""
         
         user_prompt = f"""
-Please analyze this car rental email and extract ALL separate bookings. Look carefully for:
-- Multiple dates mentioned
-- Multiple passengers
-- Multiple trips/routes
-- Different pickup times
-- Round trips vs one-way trips
+Please analyze this car rental email and extract ALL separate bookings with comprehensive analysis. 
+
+STEP 1 - MULTIPLE BOOKING ANALYSIS:
+Look carefully for these indicators requiring SEPARATE bookings:
+- Multiple DATES mentioned (17th Sept + 18th Sept = 2 bookings)
+- Different pickup/drop TIMES on same day with different passengers
+- Round trips with overnight stays (outbound + return legs)
+- Multi-day trips (each day = separate booking)
+- Different passengers traveling on different days
+- Separate outbound and return journeys
+
+STEP 2 - COMPREHENSIVE DATA EXTRACTION:
+Extract EVERY detail from the email - nothing should be lost:
+- All names, numbers, addresses, instructions
+- Driver preferences, special requirements, VIP needs
+- Corporate information, billing details, payment methods
+- Vehicle specifications, cleanliness requirements
+- Alternate contacts, emergency numbers, backup arrangements
+- Route variations, timing flexibility, special equipment
+- If information doesn't fit standard fields, put in 'remarks' or 'additional_info'
+
+STEP 3 - SMART CITY MAPPING:
+- Extract only CITY names for from_location and to_location
+- Map suburbs to cities (Jogeshwari → Mumbai, Andheri → Mumbai)
+- Full addresses go in reporting_address and drop_address
 
 EMAIL CONTENT:
 {email_content}
@@ -366,9 +679,14 @@ Please provide your analysis in this EXACT JSON format:
             "passenger_email": "primary passenger email or null",
             "additional_passengers": "other passenger names (comma-separated) or null",
             "multiple_pickup_locations": "multiple pickup addresses (comma-separated) or null",
-            "from_location": "source location or null",
-            "to_location": "destination location or null", 
-            "vehicle_group": "standardized vehicle name or null",
+            "from_location": "source CITY NAME ONLY or null",
+            "to_location": "destination CITY NAME ONLY or null",
+            "drop1": "first drop CITY NAME or null",
+            "drop2": "second drop CITY NAME or null",
+            "drop3": "third drop CITY NAME or null",
+            "drop4": "fourth drop CITY NAME or null",
+            "drop5": "fifth drop CITY NAME or null", 
+            "vehicle_group": "standardized vehicle name or null (leave null if not mentioned - system will default to Dzire)",
             "duty_type": "duty type or null",
             "start_date": "YYYY-MM-DD format (e.g., 27/08/2025 → 2025-08-27, convert relative dates) or null",
             "end_date": "YYYY-MM-DD format (e.g., 27/08/2025 → 2025-08-27) or null",
@@ -379,8 +697,7 @@ Please provide your analysis in this EXACT JSON format:
             "flight_train_number": "flight/train number or null",
             "dispatch_center": "dispatch info or null",
             "bill_to": "billing entity or null",
-            "price": "price info or null",
-            "remarks": "special instructions/notes or null",
+            "remarks": "ONLY booking-related special instructions/notes (exclude greetings, signatures) or null",
             "labels": "any labels or null",
             "additional_info": "any other relevant information or null"
         }}
@@ -572,7 +889,7 @@ Return ONLY valid JSON, no additional text."""
                 booking = BookingExtraction(**processed_data)
                 
                 # Apply business rules
-                booking = self._apply_business_rules(booking)
+                booking = self._apply_business_rules(booking, email_content)
                 
                 bookings.append(booking)
                 
@@ -879,24 +1196,153 @@ Return ONLY valid JSON, no additional text."""
             logger.warning(f"Failed to load vehicle mappings: {str(e)}")
         return vehicle_mappings
     
+    def _load_corporate_mappings(self) -> Dict[str, Dict[str, str]]:
+        """Load corporate mappings from Corporate (1).csv file"""
+        corporate_mappings = {}
+        try:
+            with open('Corporate (1).csv', 'r', encoding='utf-8') as file:
+                reader = csv.DictReader(file)
+                for row in reader:
+                    corporate_name = row.get('Corporate', '').strip()
+                    approval_reqd = row.get('Approval Reqd (Yes or No)', '').strip()
+                    duty_type = row.get('Duty Type (G2G or P2P)', '').strip()
+                    
+                    if corporate_name and duty_type:
+                        corporate_mappings[corporate_name.lower()] = {
+                            'approval_required': approval_reqd,
+                            'duty_type': duty_type,
+                            'original_name': corporate_name
+                        }
+            logger.info(f"Loaded {len(corporate_mappings)} corporate mappings")
+        except Exception as e:
+            logger.warning(f"Failed to load corporate mappings: {str(e)}")
+        return corporate_mappings
+    
+    def _detect_corporate_company(self, email_content: str) -> Optional[Dict[str, str]]:
+        """Detect corporate company from email content"""
+        if not self.corporate_mappings:
+            return None
+            
+        email_lower = email_content.lower()
+        
+        # Try exact matches first
+        for corp_key, corp_info in self.corporate_mappings.items():
+            if corp_key in email_lower:
+                return corp_info
+        
+        # Try partial matches for common variations
+        for corp_key, corp_info in self.corporate_mappings.items():
+            corp_words = corp_key.split()
+            if len(corp_words) > 1:
+                # Check if major words from company name appear in email
+                matches = sum(1 for word in corp_words if len(word) > 3 and word in email_lower)
+                if matches >= len(corp_words) * 0.7:  # 70% word match threshold
+                    return corp_info
+        
+        return None
+    
+    def _recommend_package(self, booking: BookingExtraction) -> str:
+        """Recommend appropriate package based on booking details and duty type"""
+        duty_type_prefix = "G-" if booking.corporate_duty_type == "G2G" else "P-"
+        
+        # Determine package based on booking context
+        remarks_lower = (booking.remarks or "").lower()
+        additional_info_lower = (booking.additional_info or "").lower()
+        duty_lower = (booking.duty_type or "").lower()
+        
+        combined_text = f"{remarks_lower} {additional_info_lower} {duty_lower}"
+        
+        # Check for 4HR patterns (Drop/Airport)
+        drop_keywords = ['drop', 'airport transfer', 'airport pickup', 'pickup from airport', 'drop to airport']
+        if any(keyword in combined_text for keyword in drop_keywords):
+            return f"{duty_type_prefix}04HR 40KMS"
+        
+        # Check for outstation patterns
+        from_city = (booking.from_location or "").lower()
+        to_city = (booking.to_location or "").lower()
+        
+        major_cities = ['mumbai', 'pune', 'hyderabad', 'chennai', 'delhi', 'ahmedabad', 'bangalore']
+        
+        # Check if it's outstation travel
+        if from_city and to_city and from_city != to_city:
+            if any(city in from_city or city in to_city for city in ['kolkata'] + [c for c in major_cities]):
+                if 'kolkata' in from_city or 'kolkata' in to_city:
+                    return f"{duty_type_prefix}Outstation 300KMS"
+                else:
+                    return f"{duty_type_prefix}Outstation 250KMS"
+        
+        # Check for 8HR patterns (Local use/At disposal)
+        local_keywords = ['at disposal', 'local use', 'city trip', 'whole day use', 'visit', 'as per guest', 'local']
+        if any(keyword in combined_text for keyword in local_keywords):
+            return f"{duty_type_prefix}08HR 80KMS"
+        
+        # Default to 8HR 80KMS when unclear
+        return f"{duty_type_prefix}08HR 80KMS"
+    
+    def _apply_corporate_logic(self, booking: BookingExtraction, email_content: str) -> BookingExtraction:
+        """Apply corporate mapping and package recommendation logic"""
+        # Detect corporate company
+        corporate_info = self._detect_corporate_company(email_content)
+        
+        if corporate_info:
+            # Set corporate duty type and approval requirements
+            if corporate_info['approval_required'].lower() in ['no', 'n']:
+                booking.corporate_duty_type = corporate_info['duty_type']
+                booking.approval_required = "No"
+                # Recommend package based on duty type and booking context
+                booking.recommended_package = self._recommend_package(booking)
+            else:
+                booking.approval_required = "Yes"
+                booking.corporate_duty_type = None  # Don't auto-assign if approval needed
+                booking.recommended_package = "Approval Required"
+            
+            # Update corporate name if detected
+            if not booking.corporate:
+                booking.corporate = corporate_info['original_name']
+        
+        return booking
+    
     def _map_city_name(self, location: str) -> str:
-        """Map location/address to standardized city name"""
+        """Map location/address to standardized city name with suburb mapping"""
         if not location:
             return None
             
         location_lower = location.lower().strip()
         
-        # Check for exact match first
+        # First, check suburb-to-city mappings for comprehensive coverage
+        for suburb, city in self.suburb_city_mappings.items():
+            if suburb in location_lower:
+                logger.info(f"Mapped suburb '{suburb}' to city '{city}' from location '{location}'")
+                return city
+        
+        # Check for exact match in CSV city mappings
         if location_lower in self.city_mappings:
             return self.city_mappings[location_lower]
         
-        # Check for partial matches
+        # Check for partial matches in CSV city mappings
         for city_variant, standard_city in self.city_mappings.items():
             if city_variant in location_lower or location_lower in city_variant:
                 return standard_city
         
-        # If no match found, return original location
-        return location
+        # Extract city from common address patterns
+        city_patterns = [
+            r'(?:^|[\s,])([A-Za-z\s]+)\s+airport(?:$|[\s,])',  # "Delhi Airport", "Mumbai Airport"
+            r'(?:^|[\s,])([A-Za-z\s]+)\s+railway\s+station(?:$|[\s,])',  # "Chennai Railway Station"
+            r'(?:^|[\s,])([A-Za-z\s]+)\s+bus\s+stand(?:$|[\s,])',  # "Bangalore Bus Stand"
+        ]
+        
+        for pattern in city_patterns:
+            match = re.search(pattern, location_lower)
+            if match:
+                extracted_city = match.group(1).strip().title()
+                # Check if extracted city is in our suburb mappings
+                if extracted_city.lower() in self.suburb_city_mappings:
+                    return self.suburb_city_mappings[extracted_city.lower()]
+                logger.info(f"Extracted city '{extracted_city}' from address pattern in '{location}'")
+                return extracted_city
+        
+        # If no match found, return original location but capitalize properly
+        return location.title() if location else location
     
     def _map_vehicle_type(self, vehicle: str) -> str:
         """Map vehicle name to standardized vehicle group using CSV data"""
@@ -926,7 +1372,7 @@ Return ONLY valid JSON, no additional text."""
         return vehicle
     
     def _round_time_to_15_minutes(self, time_str: str) -> str:
-        """Round time to nearest 15-minute interval (8:00, 8:15, 8:30, 8:45)"""
+        """Round time to 15-minute intervals using enhanced business rules"""
         if not time_str:
             return None
             
@@ -945,20 +1391,26 @@ Return ONLY valid JSON, no additional text."""
                     hour = int(time_str[:-2])
                     minute = int(time_str[-2:])
             
-            # Round minute to nearest 15-minute interval
+            # Use the enhanced 15-minute interval logic
             if minute <= 7:        # 0-7 → :00
                 rounded_minute = 0
-            elif minute <= 22:     # 8-22 → :15
-                rounded_minute = 15
-            elif minute <= 37:     # 23-37 → :30
-                rounded_minute = 30
-            elif minute <= 52:     # 38-52 → :45
+            elif minute <= 22:     # 8-22 → :15 or :00
+                if minute <= 10:   # Special case: 7:10 → 7:00
+                    rounded_minute = 0
+                else:
+                    rounded_minute = 15
+            elif minute <= 37:     # 23-37 → :30 or :15
+                if minute <= 25:   # 25 and below → :15
+                    rounded_minute = 15
+                else:
+                    rounded_minute = 30
+            elif minute <= 52:     # 38-52 → :45 or :30
+                if minute <= 43:   # 43 and below (like 7:43) → :30
+                    rounded_minute = 30
+                else:
+                    rounded_minute = 45
+            else:                  # 53-59 → :45
                 rounded_minute = 45
-            else:                  # 53-59 → next hour :00
-                rounded_minute = 0
-                hour += 1
-                if hour >= 24:
-                    hour = 0
             
             return f"{hour:02d}:{rounded_minute:02d}"
             

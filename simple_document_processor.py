@@ -169,12 +169,33 @@ Document Type: Booking/Reservation Form or Table
 EXTRACTED CONTENT FROM TEXTRACT:
 {extracted_text}
 
-PROCESSING INSTRUCTION:
-This content was extracted from a booking document using AWS Textract.
-Extract structured booking information from this document data.
-Look for multiple bookings if this is a table with multiple rows.
-Map the document fields to standard booking fields.
-Handle different document formats: reservation forms, travel requisitions, booking tables.
+COMPREHENSIVE PROCESSING INSTRUCTIONS:
+
+MULTIPLE BOOKING DETECTION:
+- Analyze for multiple SEPARATE bookings (different dates/passengers/routes)
+- Each unique DATE requires separate booking (17th & 18th Sept = 2 bookings)
+- Table rows typically represent separate bookings
+- Round trips with overnight stays = separate outbound & return bookings
+- Multi-day requirements = separate booking per day
+
+ZERO DATA LOSS POLICY:
+- Extract EVERY piece of information from the document
+- Driver names, contact numbers, special instructions, VIP requirements
+- Corporate details, billing information, payment methods, reference numbers
+- Vehicle preferences, cleanliness requirements, timing flexibility
+- Emergency contacts, alternate arrangements, backup information
+- If data doesn't fit standard fields, put in 'remarks' or 'additional_info'
+
+CITY STANDARDIZATION:
+- Extract only CITY names for from_location and to_location
+- Map suburbs to cities (Jogeshwari → Mumbai, Andheri → Mumbai)
+- Full addresses go in reporting_address and drop_address
+
+TIME EXTRACTION:
+- Extract exact times from document (7:43, 7:10, 7:53)
+- Do not round times during extraction
+
+Document formats handled: reservation forms, travel requisitions, booking tables, email screenshots.
 """
         
         # Process with our unified email processor

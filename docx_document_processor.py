@@ -174,14 +174,37 @@ Content Structure: {len(parsed_data['paragraphs'])} paragraphs, {len(parsed_data
 EXTRACTED CONTENT FROM DOCX:
 {document_text}
 
-PROCESSING INSTRUCTION:
-This content was extracted from a Microsoft Word document (.docx) using python-docx library.
-The document may contain booking forms, reservation tables, or travel requisitions.
-Extract structured booking information from this document data.
-Look for multiple bookings if this document contains multiple rows or sections.
-Pay special attention to table data which often contains structured booking information.
+COMPREHENSIVE PROCESSING INSTRUCTIONS:
+
+MULTIPLE BOOKING DETECTION:
+- Analyze for multiple SEPARATE bookings (different dates/passengers/routes)
+- Each unique DATE requires separate booking (17th & 18th Sept = 2 bookings)
+- Table rows typically represent separate bookings
+- Different passengers on different dates = separate bookings
+- Round trips with overnight stays = separate outbound & return bookings
+- Multi-day requirements = separate booking per day
+- Document sections may contain multiple booking requirements
+
+ZERO DATA LOSS POLICY:
+- Extract EVERY piece of information from the Word document
+- Driver names, contact numbers, special instructions, VIP requirements
+- Corporate details, billing information, payment methods, authorization codes
+- Vehicle preferences, cleanliness requirements, timing flexibility
+- Emergency contacts, alternate arrangements, backup information
+- Table headers, footnotes, document annotations, approval signatures
+- If data doesn't fit standard fields, put in 'remarks' or 'additional_info'
+
+CITY STANDARDIZATION:
+- Extract only CITY names for from_location and to_location
+- Map suburbs to cities (Jogeshwari → Mumbai, Andheri → Mumbai)
+- Full addresses go in reporting_address and drop_address
+
+TIME EXTRACTION:
+- Extract exact times from document (7:43, 7:10, 7:53)
+- Do not round times during extraction
+
+Table data often contains structured booking information with multiple records.
 Apply all business rules for vehicle standardization, time normalization, and route handling.
-Extract comprehensive details including driver preferences, special instructions, and multiple passengers.
 """
         
         # Process with our unified email processor
