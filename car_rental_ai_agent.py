@@ -532,7 +532,7 @@ class CarRentalAIAgent:
             extraction_result = self._extract_multiple_with_reasoning(email_content, sender_email)
             
             # Process multiple bookings
-            bookings = self._process_multiple_extractions(extraction_result)
+            bookings = self._process_multiple_extractions(extraction_result, email_content)
             
             logger.info(f"Multiple extraction completed. Found {len(bookings)} booking(s)")
             return bookings
@@ -864,7 +864,7 @@ Return ONLY valid JSON, no additional text."""
             logger.error(f"Response was: {response[:500]}...")
             raise ValueError(f"Invalid JSON in AI response: {str(e)}")
     
-    def _process_multiple_extractions(self, raw_data: Dict) -> List[BookingExtraction]:
+    def _process_multiple_extractions(self, raw_data: Dict, email_content: str = "") -> List[BookingExtraction]:
         """Process multiple extraction results into BookingExtraction objects"""
         
         bookings = []
