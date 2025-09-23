@@ -55,7 +55,7 @@ class StructuredEmailAgent(CarRentalAIAgent):
             extraction_result = self._extract_structured_with_reasoning(email_content, sender_email)
             
             # Process the results into BookingExtraction objects
-            bookings = self._process_structured_results(extraction_result)
+            bookings = self._process_structured_results(extraction_result, email_content)
             
             # Create result object
             result = StructuredExtractionResult(
@@ -112,6 +112,31 @@ EMAIL CONTENT:
 
 SENDER EMAIL: {sender_email or 'Not provided'}
 
+DUTY TYPE PACKAGE DETERMINATION (CRITICAL - Output exact package format):
+
+**STEP 1: Corporate Detection & G2G/P2P Classification**
+- Identify corporate/company name from email content
+- Check Corporate (1).csv file to determine if corporate is G2G or P2P
+- If corporate not found in CSV, default to P2P
+
+**STEP 2: Keyword Detection for Package Type**
+- "Drop", "Airport Transfer" keywords → Use 04HR 40KMS package
+- "At disposal", "Local use", "Visit", "Whole day use", "Use as per guest instructions" → Use 08HR 80KMS package
+- If NO specific time/usage mentioned in email → Default to 08HR 80KMS package
+- Outstation to/from "Mumbai", "Pune", "Hyderabad", "Chennai", "Delhi", "Ahmedabad", "Bangalore" → Use Outstation 250KMS package
+- Outstation to/from "Kolkata" or any other city → Use Outstation 300KMS package
+
+**STEP 3: Final duty_type Output Format (MANDATORY)**
+- G2G Corporate + Drop/Airport → "G-04HR 40KMS"
+- G2G Corporate + Local/At disposal → "G-08HR 80KMS"
+- G2G Corporate + Outstation (major cities) → "G-Outstation 250KMS"
+- G2G Corporate + Outstation (Kolkata/others) → "G-Outstation 300KMS"
+- P2P Corporate + Drop/Airport → "P-04HR 40KMS"
+- P2P Corporate + Local/At disposal → "P-08HR 80KMS"
+- P2P Corporate + Outstation (major cities) → "P-Outstation 250KMS"
+- P2P Corporate + Outstation (Kolkata/others) → "P-Outstation 300KMS"
+- Default fallback → "P-08HR 80KMS"
+
 INSTRUCTIONS:
 1. Carefully analyze the structure to identify how many separate bookings are present
 2. Each booking should be a separate record, even if they share some common information
@@ -144,7 +169,7 @@ Please provide your analysis in this EXACT JSON format:
             "drop4": "fourth drop CITY NAME or null",
             "drop5": "fifth drop CITY NAME or null", 
             "vehicle_group": "standardized vehicle name or null (leave null if not mentioned - system will default to Dzire)",
-            "duty_type": "duty type or null",
+            "duty_type": "Package format like G-04HR 40KMS, P-08HR 80KMS, G-Outstation 250KMS, etc. (based on corporate G2G/P2P + keywords) or null",
             "start_date": "YYYY-MM-DD format or null",
             "end_date": "YYYY-MM-DD format or null",
             "reporting_time": "HH:MM format or null",
@@ -188,7 +213,7 @@ Return ONLY valid JSON, no additional text.
             logger.error(f"Structured GPT-4o extraction failed: {str(e)}")
             raise
     
-    def _process_structured_results(self, extraction_result: Dict) -> List[BookingExtraction]:
+    def _process_structured_results(self, extraction_result: Dict, email_content: str = "") -> List[BookingExtraction]:
         """Process AI extraction results into BookingExtraction objects"""
         
         bookings = []
@@ -241,10 +266,12 @@ Return ONLY valid JSON, no additional text.
                 # Create BookingExtraction object
                 booking = BookingExtraction(**processed_data)
                 
-                # Apply business rules (need to get email content from parent)
-                # For now, apply basic rules without email content
+                # Apply business rules including corporate logic
                 if not booking.vehicle_group or booking.vehicle_group.strip() == "":
                     booking.vehicle_group = "Dzire"
+                
+                # Apply corporate logic (inherited from CarRentalAIAgent)
+                booking = self._apply_corporate_logic(booking, email_content)
                 
                 bookings.append(booking)
                 
