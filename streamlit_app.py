@@ -220,90 +220,67 @@ def display_flight_results(result):
                 display_single_flight(flight, i)
 
 def display_single_booking(booking: BookingExtraction, booking_number: int = None):
-    """Display a single booking in a clean format"""
+    """Display a single booking with ALL 20 fields from AI field list.csv"""
     if booking_number:
         st.subheader(f"📋 Booking #{booking_number}")
     else:
         st.subheader("📋 Extracted Information")
     
-    # Group fields logically
+    # Helper function to display field with fallback to NA
+    def display_field(label, value, icon=""):
+        display_value = value if value and str(value).strip() and str(value).strip().lower() not in ['none', 'null'] else "NA"
+        st.write(f"**{icon} {label}:** {display_value}")
+    
+    # Display all 20 fields as per AI field list.csv in organized sections
     col1, col2 = st.columns(2)
     
     with col1:
-        st.markdown("**👤 Passenger Details**")
-        if booking.passenger_name:
-            st.write(f"**Primary Passenger:** {booking.passenger_name}")
-        if booking.passenger_phone:
-            st.write(f"**Phone:** {booking.passenger_phone}")
-        if booking.passenger_email:
-            st.write(f"**Email:** {booking.passenger_email}")
-        # Display additional passengers if present
-        if hasattr(booking, 'additional_passengers') and booking.additional_passengers:
-            st.write(f"**Other Passengers:** {booking.additional_passengers}")
-        if booking.corporate:
-            st.write(f"**Corporate:** {booking.corporate}")
+        st.markdown("**🏢 Corporate & Booking Information**")
+        display_field("Customer", booking.corporate, "🏢")
+        display_field("Booked By Name", booking.booked_by_name, "📝")
+        display_field("Booked By Phone Number", booking.booked_by_phone, "📞")
+        display_field("Booked By Email", booking.booked_by_email, "📧")
         
-        st.markdown("**📅 Trip Details**")
-        if booking.start_date:
-            st.write(f"**Date:** {booking.start_date}")
-        if booking.end_date and booking.end_date != booking.start_date:
-            st.write(f"**End Date:** {booking.end_date}")
-        if booking.reporting_time:
-            st.write(f"**Pickup Time:** {booking.reporting_time}")
-        if booking.vehicle_group:
-            st.write(f"**Vehicle:** {booking.vehicle_group}")
+        st.markdown("**👤 Passenger Information**")
+        display_field("Passenger Name", booking.passenger_name, "👤")
+        display_field("Passenger Phone Number", booking.passenger_phone, "📱")
+        display_field("Passenger Email", booking.passenger_email, "✉️")
+        
+        st.markdown("**🚗 Vehicle & Service Details**")
+        display_field("Vehicle Group", booking.vehicle_group, "🚗")
+        display_field("Duty Type", booking.duty_type, "📋")
+        display_field("Flight/Train Number", booking.flight_train_number, "✈️")
     
     with col2:
-        st.markdown("**📍 Location Details**")
-        if booking.from_location:
-            st.write(f"**From:** {booking.from_location}")
-        if booking.to_location:
-            st.write(f"**To:** {booking.to_location}")
-        if booking.reporting_address:
-            st.write(f"**Primary Pickup:** {booking.reporting_address}")
-        # Display multiple pickup locations if present
-        if hasattr(booking, 'multiple_pickup_locations') and booking.multiple_pickup_locations:
-            st.write(f"**Additional Pickups:** {booking.multiple_pickup_locations}")
+        st.markdown("**📍 Location Information**")
+        display_field("From (Service Location)", booking.from_location, "📍")
+        display_field("To", booking.to_location, "🎯")
+        display_field("Reporting Address", booking.reporting_address, "📍")
+        display_field("Drop Address", booking.drop_address, "🚩")
         
-        # Display multiple drops
-        drops = []
-        for i in range(1, 6):
-            drop_field = f"drop{i}"
-            if hasattr(booking, drop_field) and getattr(booking, drop_field):
-                drops.append(f"**Drop {i}:** {getattr(booking, drop_field)}")
-        if drops:
-            for drop_info in drops:
-                st.write(drop_info)
-        elif booking.drop_address:
-            st.write(f"**Drop Address:** {booking.drop_address}")
+        st.markdown("**📅 Date & Time Information**")
+        display_field("Start Date", booking.start_date, "📅")
+        display_field("End Date", booking.end_date, "📅")
+        display_field("Rep. Time", booking.reporting_time, "⏰")
         
-        st.markdown("**ℹ️ Additional Information**")
-        if booking.flight_train_number:
-            st.write(f"**Flight/Train:** {booking.flight_train_number}")
-        if booking.duty_type:
-            st.write(f"**Duty Type:** {booking.duty_type}")
-        
-        # Display corporate information
-        if hasattr(booking, 'corporate_duty_type') and booking.corporate_duty_type:
-            st.write(f"**Corporate Duty Type:** {booking.corporate_duty_type}")
-        if hasattr(booking, 'recommended_package') and booking.recommended_package:
-            if booking.recommended_package == "Approval Required":
-                st.warning(f"**📋 Package:** {booking.recommended_package}")
-            else:
-                st.success(f"**📦 Recommended Package:** {booking.recommended_package}")
-        if hasattr(booking, 'approval_required') and booking.approval_required:
-            if booking.approval_required.lower() == 'yes':
-                st.warning(f"**⚠️ Approval Required:** {booking.approval_required}")
-            else:
-                st.info(f"**✅ Approval Required:** {booking.approval_required}")
-        
-        if booking.remarks:
-            st.write(f"**Remarks:** {booking.remarks}")
+        st.markdown("**🔧 Additional Details**")
+        display_field("Dispatch Center", booking.dispatch_center, "🚛")
+        display_field("Labels", booking.labels, "🏷️")
+    
+    # Remarks section (full width)
+    st.markdown("**📝 Remarks & Special Instructions**")
+    remarks_value = booking.remarks if booking.remarks and str(booking.remarks).strip() and str(booking.remarks).strip().lower() not in ['none', 'null'] else "NA"
+    st.text_area("Remarks:", value=remarks_value, height=100, disabled=True, key=f"remarks_{booking_number or 'single'}")
+    
+    # Show confidence and processing info
+    if hasattr(booking, 'confidence_score') and booking.confidence_score:
+        confidence_color = "🟢" if booking.confidence_score > 0.8 else "🟡" if booking.confidence_score > 0.6 else "🔴"
+        st.caption(f"{confidence_color} Confidence Score: {booking.confidence_score:.2f}")
     
     # Show additional info if available
-    if booking.additional_info:
-        with st.expander("📄 Additional Info"):
-            st.text_area("Additional information extracted:", booking.additional_info, height=100, disabled=True)
+    if booking.additional_info and str(booking.additional_info).strip() and str(booking.additional_info).strip().lower() not in ['none', 'null', 'na']:
+        with st.expander("📄 Additional Information"):
+            st.text_area("Additional information extracted:", booking.additional_info, height=100, disabled=True, key=f"additional_{booking_number or 'single'}")
 
 def display_extraction_results(result: StructuredExtractionResult):
     """Display structured extraction results"""
