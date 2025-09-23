@@ -550,111 +550,46 @@ class CarRentalAIAgent:
         current_date_str = current_date.strftime('%Y-%m-%d')
         current_day_name = current_date.strftime('%A')
         
-        system_prompt = f"""You are an expert AI agent specialized in extracting car rental booking information from unstructured emails. You must identify ALL separate bookings and extract comprehensive details with ZERO data loss.
-
-CRITICAL BUSINESS RULES:
-1. MULTIPLE BOOKINGS ANALYSIS: 
-   - Analyze for multiple SEPARATE bookings (different dates/times/passengers/routes)
-   - Each unique DATE requires a separate booking (17th & 18th Sept = 2 bookings)
-   - Different pickup/drop times on same day = separate bookings if different passengers
-   - Round trips with overnight stay = 2 separate bookings (outbound + return)
-   - Multi-day requirements = separate booking per day
-   - Example: "Car for 17th & 18th Sept" = 2 bookings, not 1
-
-2. COMPREHENSIVE DATA EXTRACTION (ZERO LOSS POLICY):
-   - Extract EVERY piece of information from the email
-   - If data doesn't fit standard fields, put it in 'remarks' or 'additional_info'
-   - Driver names, contact numbers, special preferences, cleanliness requirements
-   - VIP instructions, billing details, payment methods, corporate contacts
-   - Vehicle preferences, alternate contact numbers, emergency contacts
-   - Route variations, timing flexibility, special equipment needs
-
-3. MULTIPLE DROP LOCATIONS:
-   - Extract ALL drop locations separately as drop1, drop2, drop3, drop4, drop5
-   - Example: "Pick from A, drop at B, then C, finally D" = drop1: B, drop2: C, drop3: D
-   - For round trips: "Mumbai to Pune and back to Mumbai" = drop1: Mumbai (final destination)
-
-4. ENHANCED BUSINESS LOGIC:
-   - VEHICLE DEFAULT: If no vehicle mentioned, DO NOT extract any vehicle (system will default to 'Dzire')
-   - ROUND TRIP LOGIC: "Bangalore to Mysore and back to Bangalore" = drop1 should be Bangalore
-   - CITY NAMES ONLY: from_location and to_location must contain ONLY city names, not full addresses
-   - INTRA-CITY: If mentioned as "intra-city", "within city", "local use" - from and to should be same city
-   - NO PRICE EXTRACTION: Do NOT extract any price/cost information
-
-5. MULTIPLE PASSENGERS CLARIFICATION:
-   - Multiple passenger names = ONE booking with multiple people, NOT separate bookings
-   - Put primary passenger in 'passenger_name', others in 'additional_passengers'
-   - Example: "John and Mary traveling" = passenger_name: John, additional_passengers: Mary
-
-6. SPECIAL INSTRUCTIONS FILTERING:
-   - Extract ONLY booking-related instructions in remarks
-   - EXCLUDE: greetings (hello, hi), signatures (regards, thanks), pleasantries
-   - INCLUDE: driver instructions, vehicle requirements, timing notes, special needs
-
-7. CORPORATE COMPANY DETECTION:
-   - Identify company names from email signatures, domains, or content
-   - Look for corporate entities that might be in our database
-   - Extract company names accurately for corporate duty type mapping
-
-8. STANDARDIZATION RULES:
-   - Vehicle names: Toyota Innova/Innova → Innova Crysta (MANDATORY)
-   - City names: Suburb → City (Jogeshwari → Mumbai, Andheri → Mumbai)
-   - Time precision: Extract exact times (7:43, 7:10, 7:53) - no rounding
-   - Phone numbers: Clean format (10 digits)
-   - Addresses: Full addresses in reporting_address/drop_address, cities only in from/to_location
-
-CRITICAL DATE FORMAT:
-- Input dates are in DD/MM/YYYY format (e.g., 27/08/2025 = 27th August 2025)
-- Convert to YYYY-MM-DD (e.g., 27/08/2025 → 2025-08-27)
-- DO NOT interpret as MM/DD/YYYY or YYYY/MM/DD
-
-DATE CONVERSION REFERENCE (Today is {current_date_str}, {current_day_name}):
-- "today" = {current_date_str}
-- "tomorrow" = {(current_date + timedelta(days=1)).strftime('%Y-%m-%d')}
-- "day after tomorrow" = {(current_date + timedelta(days=2)).strftime('%Y-%m-%d')}
-- "next Monday" = next occurrence of that weekday
-
-VEHICLE STANDARDIZATION (MANDATORY):
-- Dzire/Desire → Swift Dzire
-- Toyota Innova/Innova → Innova Crysta (BUSINESS RULE)
-- Crysta → Innova Crysta
-- Etios → Toyota Etios
-- AC Cab → AC Sedan
-- Tempo Traveller → Tempo Traveller
-
-REMARKS EXTRACTION:
-- Include ALL special instructions
-- Extract driver name/contact if mentioned (e.g., "need driver XYZ - 9876543210")
-- Include cleanliness requirements, timing instructions, special needs
-- Capture payment instructions, billing details
-- Note any VIP/special guest requirements"""
+        system_prompt = f"""Fields (Required to be filled by AI. The field list should NOT change. If any information of any field is not given, The AI can fill in as "NA" or"-") ,Description,Notes,,,
+Customer,Name of the corporate,,,,
+Booked By Name,Bookers name,"If any extra bookers information has been given, add it it remarks",,,
+Booked By Phone Number,Bookers number,,,,
+Booked By Email,Bookers email,,,,
+Passenger Name,Passenger name,"If any extra passenger information has been given, add it it remarks",,,
+Passenger Phone Number,Passenger number,,,,
+Passenger Email,Passenger email,,,,
+From (Service Location) ,Reporting city,,,,
+To,Drop city,"In the case where the usage is only going to be in a single city, this field will be the same as the "From (Service Location) ".  In the case of outstation booking where the customer will start from a city and go to as many cities as he wants but will return to the same city, even then the two fields of from and to (city) will be same. The cities that he will travel to will be added in remarks. ONLY in the case where he will take a drop in a different  city, will the name of that city come in this column. ",,,
+Vehicle Group ,Vehicle type,"Refer the "Car" file I have sent on mail.",,,
+Duty Type ,"Drop, Local or Outstation","Refer the "Duty Type" file I have sent on whatsapp.",,,
+Start Date ,Start Date ,,,,
+End Date ,End Date ,,,,
+Rep. Time ,Reporting time,,,,
+Reporting Address,Reporting Address,"In case of multiple reporting addresses with multiple passengers, all the reporting addresses need to be put here. The AI will need to number them from 1,2,3 and so on… and put them in this column. Most of the time, the mails contain numberings and detailed instructions on which place to report first, second and so on, In that case, the AI can just copy and paste that information here without summarising or changing it in any way.",,,
+Drop Address,Drop Address,"Drop address is ONLY to be put in the case of drop (4hr40kms) duties. ALL other duty types can have this column as "NA" or"-". If the place of visit or any address is given in a local or an outstation duty, then the AI can simply copy and paste it in the remarks column.",,,
+Flight/Train Number,Flight/Train Number,"In case of multiple flight numbers, put them all in this field.",,,
+Dispatch center,City from which the car will be dispatched.,"Refer the "City" file I have sent on mail.",,,
+Remarks,Special Instructions,All the extra information provided by the booker which does not fit into the preexisting fields need to be put into this field. NO INFORMATION shoule be ommitted that is present in the mail.,,,
+Labels,There are just 3 labels we use from the entire list of labels. >-,Note: Multiple lables can be used here. There is no restriction upon the number of labels that can be put into this column.,,,
+,"1. LadyGuest- If Ms or Mrs given in the mail in the passenger info, ONLY then will this label be used.",,,,
+,2. MD's Guest- Ignore for now.,,,,
+,3. VIP- ONLY add is the booker specifies that the passenger is a VIP in the mail.,,,,
+,,,,,
+Note: For the unique numbers that some corporates need, train the AI so it can add those mandatory fields after seeing eligible corporates. (Check the "Corporate Unique Numbers" file I sent."""
         
-        user_prompt = f"""
-Please analyze this car rental email and extract ALL separate bookings with comprehensive analysis. 
+        user_prompt = f"""Please analyze this car rental email and extract a SINGLE booking only.
+- Multiple pickups and multiple drops are allowed within the same single booking.
+- If Duty Type is Outstation and multiple dates are mentioned, KEEP it as a single booking (do not create multiple bookings). Capture the additional cities/dates appropriately in remarks or date fields as applicable.
+- Use "NA" or "-" when any field information is not provided in the mail.
+- Copy instructions verbatim into Reporting Address numbering them 1,2,3... when multiple reporting addresses are present.
+- Drop Address must ONLY be filled for drop (4hr40kms) duties; otherwise use "NA" or "-".
+- Apply the exact logic for the "To" field as per the instructions.
 
-STEP 1 - MULTIPLE BOOKING ANALYSIS:
-Look carefully for these indicators requiring SEPARATE bookings:
-- Multiple DATES mentioned (17th Sept + 18th Sept = 2 bookings)
-- Different pickup/drop TIMES on same day with different passengers
-- Round trips with overnight stays (outbound + return legs)
-- Multi-day trips (each day = separate booking)
-- Different passengers traveling on different days
-- Separate outbound and return journeys
-
-STEP 2 - COMPREHENSIVE DATA EXTRACTION:
-Extract EVERY detail from the email - nothing should be lost:
-- All names, numbers, addresses, instructions
-- Driver preferences, special requirements, VIP needs
-- Corporate information, billing details, payment methods
-- Vehicle specifications, cleanliness requirements
-- Alternate contacts, emergency numbers, backup arrangements
-- Route variations, timing flexibility, special equipment
-- If information doesn't fit standard fields, put in 'remarks' or 'additional_info'
-
-STEP 3 - SMART CITY MAPPING:
-- Extract only CITY names for from_location and to_location
-- Map suburbs to cities (Jogeshwari → Mumbai, Andheri → Mumbai)
-- Full addresses go in reporting_address and drop_address
+DUTY TYPE CLASSIFICATION RULES:
+- Drop/Airport Transfer: G-04HR 40KMS or P-04HR 40KMS
+- At disposal/Local use/Visit/Whole day use/Use as per guest: G-08HR 80KMS or P-08HR 80KMS
+- Outstation (Mumbai, Pune, Hyderabad, Chennai, Delhi, Ahmedabad, Bangalore): G-Outstation 250KMS or P-Outstation 250KMS
+- Outstation (Kolkata and all other cities): G-Outstation 300KMS or P-Outstation 300KMS
 
 EMAIL CONTENT:
 {email_content}
@@ -663,51 +598,50 @@ SENDER EMAIL: {sender_email or 'Not provided'}
 
 CURRENT DATE: {current_date_str} ({current_day_name})
 
-Please provide your analysis in this EXACT JSON format:
-{{
-    "analysis": "Step-by-step analysis explaining how many separate bookings you identified and why",
-    "bookings_count": 2,
+Provide output in this EXACT JSON format (single booking, keep field names as below):""" + '''
+{
+    "analysis": "Brief extraction reasoning",
+    "bookings_count": 1,
     "bookings": [
-        {{
+        {
             "booking_number": 1,
             "corporate": "company name or null",
             "booked_by_name": "booker name or null",
-            "booked_by_phone": "booker phone or null", 
+            "booked_by_phone": "booker phone or null",
             "booked_by_email": "booker email or null",
             "passenger_name": "primary passenger name or null",
             "passenger_phone": "primary passenger phone (10 digits) or null",
             "passenger_email": "primary passenger email or null",
             "additional_passengers": "other passenger names (comma-separated) or null",
-            "multiple_pickup_locations": "multiple pickup addresses (comma-separated) or null",
-            "from_location": "source CITY NAME ONLY or null",
-            "to_location": "destination CITY NAME ONLY or null",
-            "drop1": "first drop CITY NAME or null",
-            "drop2": "second drop CITY NAME or null",
-            "drop3": "third drop CITY NAME or null",
-            "drop4": "fourth drop CITY NAME or null",
-            "drop5": "fifth drop CITY NAME or null", 
-            "vehicle_group": "standardized vehicle name or null (leave null if not mentioned - system will default to Dzire)",
-            "duty_type": "duty type or null",
-            "start_date": "YYYY-MM-DD format (e.g., 27/08/2025 → 2025-08-27, convert relative dates) or null",
-            "end_date": "YYYY-MM-DD format (e.g., 27/08/2025 → 2025-08-27) or null",
-            "reporting_time": "HH:MM format or null",
-            "start_from_garage": "garage info or null",
-            "reporting_address": "complete pickup address or null",
-            "drop_address": "complete drop address or null",
-            "flight_train_number": "flight/train number or null",
-            "dispatch_center": "dispatch info or null",
-            "bill_to": "billing entity or null",
-            "remarks": "ONLY booking-related special instructions/notes (exclude greetings, signatures) or null",
-            "labels": "any labels or null",
-            "additional_info": "any other relevant information or null"
-        }}
-        // ... additional bookings if found
+            "multiple_pickup_locations": "multiple pickup addresses (comma-separated) or NA/-",
+            "from_location": "source CITY NAME ONLY or NA/-",
+            "to_location": "destination CITY NAME ONLY or NA/-",
+            "drop1": "first drop CITY NAME or NA/-",
+            "drop2": "second drop CITY NAME or NA/-",
+            "drop3": "third drop CITY NAME or NA/-",
+            "drop4": "fourth drop CITY NAME or NA/-",
+            "drop5": "fifth drop CITY NAME or NA/-",
+            "vehicle_group": "vehicle type or NA/-",
+            "duty_type": "Drop | Local | Outstation or NA/-",
+            "start_date": "YYYY-MM-DD or NA/-",
+            "end_date": "YYYY-MM-DD or NA/-",
+            "reporting_time": "HH:MM or NA/-",
+            "start_from_garage": "garage info or NA/-",
+            "reporting_address": "complete pickup address (numbered if multiple) or NA/-",
+            "drop_address": "complete drop address (ONLY for drop 4hr40kms) or NA/-",
+            "flight_train_number": "flight/train number(s) or NA/-",
+            "dispatch_center": "city from which car will be dispatched or NA/-",
+            "bill_to": "billing entity or NA/-",
+            "remarks": "ALL extra information that does not fit other fields; copy verbatim; no summarising",
+            "labels": "LadyGuest | VIP (apply strictly as per rules) or NA/-",
+            "additional_info": "other relevant info or NA/-"
+        }
     ],
     "confidence_score": 0.85,
-    "processing_notes": "Notes about extraction process and any assumptions made"
-}}
+    "processing_notes": "Notes about extraction assumptions"
+}
 
-Return ONLY valid JSON, no additional text."""
+Return ONLY valid JSON, no additional text.'''
         
         try:
             response = self.client.chat.completions.create(
