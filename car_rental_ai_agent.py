@@ -585,11 +585,30 @@ Note: For the unique numbers that some corporates need, train the AI so it can a
 - Drop Address must ONLY be filled for drop (4hr40kms) duties; otherwise use "NA" or "-".
 - Apply the exact logic for the "To" field as per the instructions.
 
-DUTY TYPE CLASSIFICATION RULES:
-- Drop/Airport Transfer: G-04HR 40KMS or P-04HR 40KMS
-- At disposal/Local use/Visit/Whole day use/Use as per guest: G-08HR 80KMS or P-08HR 80KMS
-- Outstation (Mumbai, Pune, Hyderabad, Chennai, Delhi, Ahmedabad, Bangalore): G-Outstation 250KMS or P-Outstation 250KMS
-- Outstation (Kolkata and all other cities): G-Outstation 300KMS or P-Outstation 300KMS
+DUTY TYPE PACKAGE DETERMINATION (CRITICAL - Output exact package format):
+
+**STEP 1: Corporate Detection & G2G/P2P Classification**
+- Identify corporate/company name from email content
+- Check Corporate (1).csv file to determine if corporate is G2G or P2P
+- If corporate not found in CSV, default to P2P
+
+**STEP 2: Keyword Detection for Package Type**
+- "Drop", "Airport Transfer" keywords → Use 04HR 40KMS package
+- "At disposal", "Local use", "Visit", "Whole day use", "Use as per guest instructions" → Use 08HR 80KMS package
+- If NO specific time/usage mentioned in email → Default to 08HR 80KMS package
+- Outstation to/from "Mumbai", "Pune", "Hyderabad", "Chennai", "Delhi", "Ahmedabad", "Bangalore" → Use Outstation 250KMS package
+- Outstation to/from "Kolkata" or any other city → Use Outstation 300KMS package
+
+**STEP 3: Final duty_type Output Format (MANDATORY)**
+- G2G Corporate + Drop/Airport → "G-04HR 40KMS"
+- G2G Corporate + Local/At disposal → "G-08HR 80KMS"
+- G2G Corporate + Outstation (major cities) → "G-Outstation 250KMS"
+- G2G Corporate + Outstation (Kolkata/others) → "G-Outstation 300KMS"
+- P2P Corporate + Drop/Airport → "P-04HR 40KMS"
+- P2P Corporate + Local/At disposal → "P-08HR 80KMS"
+- P2P Corporate + Outstation (major cities) → "P-Outstation 250KMS"
+- P2P Corporate + Outstation (Kolkata/others) → "P-Outstation 300KMS"
+- Default fallback → "P-08HR 80KMS"
 
 EMAIL CONTENT:
 {email_content}
@@ -622,7 +641,7 @@ Provide output in this EXACT JSON format (single booking, keep field names as be
             "drop4": "fourth drop CITY NAME or NA/-",
             "drop5": "fifth drop CITY NAME or NA/-",
             "vehicle_group": "vehicle type or NA/-",
-            "duty_type": "Drop | Local | Outstation or NA/-",
+            "duty_type": "Package format like G-04HR 40KMS, P-08HR 80KMS, G-Outstation 250KMS, etc. (based on corporate G2G/P2P + keywords)",
             "start_date": "YYYY-MM-DD or NA/-",
             "end_date": "YYYY-MM-DD or NA/-",
             "reporting_time": "HH:MM or NA/-",
@@ -1214,27 +1233,93 @@ Return ONLY valid JSON, no additional text."""
         return f"{duty_type_prefix}08HR 80KMS"
     
     def _apply_corporate_logic(self, booking: BookingExtraction, email_content: str) -> BookingExtraction:
-        """Apply corporate mapping and package recommendation logic"""
+        """Apply corporate mapping and package determination logic"""
         # Detect corporate company
         corporate_info = self._detect_corporate_company(email_content)
         
+        # Determine G2G or P2P category
+        duty_category = "P2P"  # Default fallback
         if corporate_info:
+            duty_category = corporate_info.get('duty_type', 'P2P')
+            
             # Set corporate duty type and approval requirements
             if corporate_info['approval_required'].lower() in ['no', 'n']:
                 booking.corporate_duty_type = corporate_info['duty_type']
                 booking.approval_required = "No"
-                # Recommend package based on duty type and booking context
-                booking.recommended_package = self._recommend_package(booking)
             else:
                 booking.approval_required = "Yes"
                 booking.corporate_duty_type = None  # Don't auto-assign if approval needed
-                booking.recommended_package = "Approval Required"
             
             # Update corporate name if detected
             if not booking.corporate:
                 booking.corporate = corporate_info['original_name']
         
+        # Determine package format based on keywords and corporate category
+        package_format = self._determine_package_format(booking, email_content, duty_category)
+        
+        # Set the duty_type to the package format
+        booking.duty_type = package_format
+        
+        # Set recommended package for backward compatibility
+        booking.recommended_package = package_format
+        
         return booking
+    
+    def _determine_package_format(self, booking: BookingExtraction, email_content: str, duty_category: str) -> str:
+        """Determine the exact package format based on keywords and G2G/P2P category"""
+        
+        # Combine all text sources for keyword detection
+        combined_text = f"{email_content} {booking.remarks or ''} {booking.additional_info or ''}".lower()
+        
+        # Determine package type based on keywords
+        package_type = "08HR 80KMS"  # Default fallback
+        
+        # Check for Drop/Airport Transfer keywords
+        drop_keywords = ['drop', 'airport transfer', 'airport pickup', 'pickup from airport', 'drop to airport']
+        if any(keyword in combined_text for keyword in drop_keywords):
+            package_type = "04HR 40KMS"
+        
+        # Check for Local/At disposal keywords
+        local_keywords = ['at disposal', 'local use', 'visit', 'whole day use', 'use as per guest instructions', 'local']
+        if any(keyword in combined_text for keyword in local_keywords):
+            package_type = "08HR 80KMS"
+        
+        # Check for outstation keywords with cities
+        major_cities = ['mumbai', 'pune', 'hyderabad', 'chennai', 'delhi', 'ahmedabad', 'bangalore']
+        kolkata_and_others = ['kolkata']
+        
+        # Check if it's outstation travel based on from/to locations
+        from_city = (booking.from_location or "").lower()
+        to_city = (booking.to_location or "").lower()
+        
+        is_outstation = False
+        is_major_city_outstation = False
+        
+        # Check if from and to are different cities (outstation)
+        if from_city and to_city and from_city != to_city:
+            is_outstation = True
+            # Check if either city is in major cities list
+            if any(city in from_city or city in to_city for city in major_cities):
+                is_major_city_outstation = True
+        
+        # Override package type for outstation
+        if is_outstation:
+            if is_major_city_outstation:
+                package_type = "Outstation 250KMS"
+            else:
+                # Check specifically for Kolkata or default to 300KMS for other cities
+                if 'kolkata' in from_city or 'kolkata' in to_city:
+                    package_type = "Outstation 300KMS"
+                else:
+                    package_type = "Outstation 300KMS"  # All other cities
+        
+        # Combine with G2G or P2P prefix
+        package_prefix = duty_category  # G2G or P2P
+        final_package = f"{package_prefix}-{package_type}"
+        
+        logger.info(f"Package determination: Category={duty_category}, Type={package_type}, Final={final_package}")
+        
+        return final_package
     
     def _map_city_name(self, location: str) -> str:
         """Map location/address to standardized city name with suburb mapping"""
