@@ -128,6 +128,10 @@ def save_to_google_sheets(booking_data):
 
 def display_single_flight(flight, flight_number: int = None):
     """Display a single flight in a clean format"""
+    import time
+    # Generate a truly unique key for flight displays
+    flight_unique_key = f"flight_{flight_number if flight_number is not None else 'single'}_{int(time.time() * 1000000)}"
+    
     if flight_number:
         st.subheader(f"✈️ Flight #{flight_number}")
     else:
@@ -200,7 +204,7 @@ def display_single_flight(flight, flight_number: int = None):
     
     if flight.additional_info:
         with st.expander("📄 Additional Info"):
-            st.text_area("Additional flight information:", flight.additional_info, height=100, disabled=True)
+            st.text_area("Additional flight information:", flight.additional_info, height=100, disabled=True, key=f"flight_additional_{flight_unique_key}")
 
 def display_flight_results(result):
     """Display flight extraction results"""
@@ -221,6 +225,10 @@ def display_flight_results(result):
 
 def display_single_booking(booking: BookingExtraction, booking_number: int = None):
     """Display a single booking with ALL 20 fields from AI field list.csv"""
+    import time
+    # Generate a truly unique key based on booking_number and timestamp
+    unique_key = f"{booking_number if booking_number is not None else 'single'}_{int(time.time() * 1000000)}"
+    
     if booking_number:
         st.subheader(f"📋 Booking #{booking_number}")
     else:
@@ -270,7 +278,7 @@ def display_single_booking(booking: BookingExtraction, booking_number: int = Non
     # Remarks section (full width)
     st.markdown("**📝 Remarks & Special Instructions**")
     remarks_value = booking.remarks if booking.remarks and str(booking.remarks).strip() and str(booking.remarks).strip().lower() not in ['none', 'null'] else "NA"
-    st.text_area("Remarks:", value=remarks_value, height=100, disabled=True, key=f"remarks_{booking_number or 'single'}")
+    st.text_area("Remarks:", value=remarks_value, height=100, disabled=True, key=f"remarks_{unique_key}")
     
     # Show confidence and processing info
     if hasattr(booking, 'confidence_score') and booking.confidence_score:
@@ -280,7 +288,7 @@ def display_single_booking(booking: BookingExtraction, booking_number: int = Non
     # Show additional info if available
     if booking.additional_info and str(booking.additional_info).strip() and str(booking.additional_info).strip().lower() not in ['none', 'null', 'na']:
         with st.expander("📄 Additional Information"):
-            st.text_area("Additional information extracted:", booking.additional_info, height=100, disabled=True, key=f"additional_{booking_number or 'single'}")
+            st.text_area("Additional information extracted:", booking.additional_info, height=100, disabled=True, key=f"additional_{unique_key}")
 
 def display_extraction_results(result: StructuredExtractionResult):
     """Display structured extraction results"""
