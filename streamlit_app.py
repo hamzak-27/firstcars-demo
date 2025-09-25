@@ -459,6 +459,21 @@ def main():
     except Exception as e:
         st.warning(f"⚠️ Flight processor initialization failed: {str(e)}")
     
+    # Initialize Enhanced Form processor
+    enhanced_form_processor = None
+    try:
+        from enhanced_form_processor import EnhancedFormProcessor
+        enhanced_form_processor = EnhancedFormProcessor(openai_api_key=api_key)
+        if hasattr(enhanced_form_processor, 'textract_available') and enhanced_form_processor.textract_available:
+            st.success("📋 Enhanced Form Processing is available! (FORMS + TABLES extraction with Textract)")
+        else:
+            st.warning("⚠️ Enhanced form processor available but AWS not configured")
+            enhanced_form_processor = None
+    except ImportError as e:
+        st.warning(f"⚠️ Enhanced form processing not available: Missing dependencies")
+    except Exception as e:
+        st.warning(f"⚠️ Enhanced form processor initialization failed: {str(e)}")
+    
     # Create tabs based on available processors
     tabs_list = ["Email Processing"]
     if document_processor:
@@ -467,6 +482,8 @@ def main():
         tabs_list.append("Word Document Processing")
     if flight_processor:
         tabs_list.append("Flight Details Processing")
+    if enhanced_form_processor:
+        tabs_list.append("Enhanced Form Processing")
     
     if len(tabs_list) > 1:
         tabs = st.tabs(tabs_list)
@@ -483,12 +500,17 @@ def main():
             tab_idx += 1
             
         tab4 = tabs[tab_idx] if flight_processor else None  # Flight Details Processing
+        if flight_processor:
+            tab_idx += 1
+        
+        tab5 = tabs[tab_idx] if enhanced_form_processor else None  # Enhanced Form Processing
     else:
         # Single email processing interface
         tab1 = st.container()
         tab2 = None
         tab3 = None
         tab4 = None
+        tab5 = None
 
     # Tab 1: Email Processing
     with tab1:
@@ -841,6 +863,159 @@ def main():
     else:
         with col_info2:
             st.error("❌ Google Sheets not connected")
+
+    # Tab 5: Enhanced Form Processing (if available)
+    if tab5 and enhanced_form_processor:
+        with tab5:
+            st.subheader("📋 Enhanced Form Processing")
+            st.info("🚀 This processor uses AWS Textract's FORMS feature to extract key-value pairs from structured documents like travel requisition forms.")
+            
+            # File uploader for forms
+            uploaded_form = st.file_uploader(
+                "Choose a form image (JPG, PNG, GIF) or PDF:",
+                type=['jpg', 'jpeg', 'png', 'gif', 'pdf'],
+                key="form_uploader"
+            )
+            
+            if uploaded_form is not None:
+                # Display file info
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("📄 File Name", uploaded_form.name)
+                with col2:
+                    st.metric("📊 File Size", f"{uploaded_form.size / 1024:.1f} KB")
+                with col3:
+                    st.metric("🔖 File Type", uploaded_form.type)
+                
+                # Process button
+                if st.button("🔍 Extract Form Data", type="primary", key="form_extract"):
+                    # Validate file
+                    is_valid, validation_message = enhanced_form_processor.validate_file(
+                        uploaded_form.name, 
+                        uploaded_form.size
+                    )
+                    
+                    if not is_valid:
+                        st.error(f"❌ {validation_message}")
+                    else:
+                        with st.spinner("🤖 Processing form with enhanced Textract + AI..."):
+                            try:
+                                # Get file content
+                                file_content = uploaded_form.read()
+                                file_type = uploaded_form.name.split('.')[-1].lower()
+                                
+                                # Process with enhanced form processor
+                                result = enhanced_form_processor.process_document(
+                                    file_content, 
+                                    uploaded_form.name, 
+                                    file_type
+                                )
+                                
+                                # Display enhanced results
+                                st.success(f"✅ Enhanced form processing completed!")
+                                
+                                # Enhanced extraction details
+                                col1, col2, col3, col4 = st.columns(4)
+                                with col1:
+                                    st.metric("📋 Bookings Found", result.total_bookings_found)
+                                with col2:
+                                    st.metric("🎯 Confidence", f"{result.confidence_score:.1%}")
+                                with col3:
+                                    st.metric("⚙️ Method", result.extraction_method)
+                                with col4:
+                                    st.metric("🕒 Processing", "Enhanced")
+                                
+                                # Display structured data extraction details
+                                if result.processing_notes:
+                                    st.info(f"📝 {result.processing_notes}")
+                                
+                                # Display bookings
+                                if result.total_bookings_found > 0:
+                                    st.subheader("📊 Extracted Booking Information")
+                                    for i, booking in enumerate(result.bookings):
+                                        display_single_booking(booking, i)
+                                        
+                                        # Show structured data if available in additional_info
+                                        if booking.additional_info and "Structured Data:" in booking.additional_info:
+                                            with st.expander(f"🔍 View Structured Data for Booking {i+1}", expanded=False):
+                                                # Extract and format the structured data
+                                                import json
+                                                try:
+                                                    # Find the JSON part in additional_info
+                                                    info_parts = booking.additional_info.split("Structured Data: ")
+                                                    if len(info_parts) > 1:
+                                                        json_str = info_parts[1].strip()
+                                                        structured_data = json.loads(json_str)
+                                                        
+                                                        # Display key-value pairs
+                                                        if structured_data.get('key_value_pairs'):
+                                                            st.write("**📋 Form Fields:**")
+                                                            for kv in structured_data['key_value_pairs']:
+                                                                st.write(f"• **{kv['key']}**: {kv['value']}")
+                                                        
+                                                        # Display tables
+                                                        if structured_data.get('tables'):
+                                                            for j, table in enumerate(structured_data['tables']):
+                                                                st.write(f"**📊 Table {j+1} ({table['type']})**")
+                                                                if table['type'] == 'form_table' and table.get('key_value_pairs'):
+                                                                    for kv in table['key_value_pairs']:
+                                                                        st.write(f"• **{kv['key']}**: {kv['value']}")
+                                                except json.JSONDecodeError:
+                                                    st.text(booking.additional_info)
+                                    
+                                    # Save to Google Sheets option
+                                    if sheets_success:
+                                        if st.button("💾 Save to Google Sheets", key="form_save_sheets"):
+                                            success, result_info = save_extraction_results_to_sheets(result)
+                                            if success:
+                                                total_saved, bookings_processed = result_info
+                                                st.success(f"✅ Successfully saved {bookings_processed} booking(s) to Google Sheets! Total rows: {total_saved}")
+                                                st.balloons()
+                                            else:
+                                                st.error(f"❌ Failed to save to Google Sheets: {result_info}")
+                                    
+                                else:
+                                    st.warning("⚠️ No booking information could be extracted from this form.")
+                                    
+                                    # Show raw extracted text for debugging
+                                    if hasattr(result, 'bookings') and result.bookings:
+                                        first_booking = result.bookings[0]
+                                        if first_booking.additional_info:
+                                            with st.expander("🔍 View Raw Extracted Content", expanded=False):
+                                                st.text(first_booking.additional_info)
+                            
+                            except Exception as e:
+                                st.error(f"❌ Enhanced form processing failed: {str(e)}")
+                                import traceback
+                                st.text(traceback.format_exc())
+            
+            else:
+                st.info("📤 Please upload a form document to begin enhanced processing.")
+                
+                # Show processing comparison
+                st.subheader("🔄 Enhanced vs Standard Processing")
+                
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    st.markdown("""
+                    **🚀 Enhanced Form Processing:**
+                    - ✅ Uses Textract FORMS feature for key-value extraction
+                    - ✅ Proper table structure preservation
+                    - ✅ Maps field labels to values correctly
+                    - ✅ Handles form-like tables (2-column key-value pairs)
+                    - ✅ Better accuracy for structured documents
+                    """)
+                
+                with col2:
+                    st.markdown("""
+                    **📄 Standard Processing:**
+                    - ⚠️ Uses only TABLES feature
+                    - ⚠️ May lose key-value relationships
+                    - ⚠️ Sequential text extraction
+                    - ⚠️ Headers might be captured instead of values
+                    - ⚠️ Less accurate for forms
+                    """)
 
 if __name__ == "__main__":
     main()
