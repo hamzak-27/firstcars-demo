@@ -289,6 +289,61 @@ def display_single_booking(booking: BookingExtraction, booking_number: int = Non
     if booking.additional_info and str(booking.additional_info).strip() and str(booking.additional_info).strip().lower() not in ['none', 'null', 'na']:
         with st.expander("📄 Additional Information"):
             st.text_area("Additional information extracted:", booking.additional_info, height=100, disabled=True, key=f"additional_{unique_key}")
+    
+    # Show duty type reasoning if available (DEBUG INFORMATION)
+    if hasattr(booking, 'duty_type_reasoning') and booking.duty_type_reasoning:
+        with st.expander("🎯 Duty Type Analysis (Debug)", expanded=False):
+            st.markdown("**🔍 Why was this duty type assigned?**")
+            st.text_area(
+                "Detailed reasoning for duty type determination:", 
+                booking.duty_type_reasoning, 
+                height=400, 
+                disabled=True, 
+                key=f"duty_reasoning_{unique_key}"
+            )
+            
+            # Add a summary box with key points
+            reasoning_text = booking.duty_type_reasoning
+            final_result = ""
+            corporate_detected = ""
+            package_type = ""
+            
+            if "FINAL DETERMINATION:" in reasoning_text:
+                lines = reasoning_text.split("\n")
+                for line in lines:
+                    if "Final Result:" in line:
+                        final_result = line.split("Final Result:")[-1].strip()
+                    elif "CORPORATE DETECTED:" in line:
+                        corporate_detected = "Yes"
+                    elif "NO CORPORATE DETECTED:" in line:
+                        corporate_detected = "No"
+                    elif "Package Type:" in line:
+                        package_type = line.split("Package Type:")[-1].strip()
+            
+            # Show summary metrics
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Corporate Detected", corporate_detected or "Unknown")
+            with col2:
+                st.metric("Package Type", package_type or "Unknown")
+            with col3:
+                st.metric("Final Duty Type", final_result or booking.duty_type or "Unknown")
+            
+            # Show color-coded status
+            if final_result:
+                if "G-" in final_result:
+                    st.success(f"🟢 G2G Corporate: {final_result}")
+                elif "P-" in final_result:
+                    st.info(f"🔵 P2P Corporate: {final_result}")
+                else:
+                    st.warning(f"🟡 Unknown Format: {final_result}")
+    
+    elif booking.duty_type:
+        # If duty type exists but no reasoning, show a note
+        with st.expander("🎯 Duty Type Analysis (Debug)", expanded=False):
+            st.warning("⚠️ Duty type was assigned but no detailed reasoning is available.")
+            st.info(f"**Current Duty Type:** {booking.duty_type}")
+            st.caption("This might be from an older extraction or fallback method.")
 
 def display_extraction_results(result: StructuredExtractionResult):
     """Display structured extraction results"""

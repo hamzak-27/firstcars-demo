@@ -67,6 +67,7 @@ class BookingExtraction:
     additional_info: Optional[str] = None
     confidence_score: Optional[float] = None
     extraction_reasoning: Optional[str] = None
+    duty_type_reasoning: Optional[str] = None  # Debug information for duty type determination
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for JSON serialization"""
@@ -1233,11 +1234,25 @@ Return ONLY valid JSON, no additional text."""
         return f"{duty_type_prefix}08HR 80KMS"
     
     def _apply_corporate_logic(self, booking: BookingExtraction, email_content: str) -> BookingExtraction:
-        """Apply corporate mapping and package determination logic"""
-        # Detect corporate company
+        """Apply corporate mapping and package determination logic with detailed reasoning"""
+        reasoning_steps = []
+        reasoning_steps.append("🎯 DUTY TYPE DETERMINATION ANALYSIS")
+        reasoning_steps.append("=" * 50)
+        
+        # Step 1: Detect corporate company
         corporate_info = self._detect_corporate_company(email_content)
         
-        # Determine G2G or P2P category
+        if corporate_info:
+            reasoning_steps.append(f"✅ CORPORATE DETECTED:")
+            reasoning_steps.append(f"   Company: {corporate_info['original_name']}")
+            reasoning_steps.append(f"   Category: {corporate_info['duty_type']} (from Corporate.csv)")
+            reasoning_steps.append(f"   Approval Required: {corporate_info['approval_required']}")
+        else:
+            reasoning_steps.append(f"❌ NO CORPORATE DETECTED:")
+            reasoning_steps.append(f"   No matching corporate found in email content")
+            reasoning_steps.append(f"   Searched in: Corporate (1).csv with {len(self.corporate_mappings)} companies")
+        
+        # Step 2: Determine G2G or P2P category
         duty_category = "P2P"  # Default fallback
         if corporate_info:
             duty_category = corporate_info.get('duty_type', 'P2P')
@@ -1246,16 +1261,25 @@ Return ONLY valid JSON, no additional text."""
             if corporate_info['approval_required'].lower() in ['no', 'n']:
                 booking.corporate_duty_type = corporate_info['duty_type']
                 booking.approval_required = "No"
+                reasoning_steps.append(f"✅ APPROVAL: Not required - auto-assigning {corporate_info['duty_type']}")
             else:
                 booking.approval_required = "Yes"
                 booking.corporate_duty_type = None  # Don't auto-assign if approval needed
+                reasoning_steps.append(f"⚠️ APPROVAL: Required - not auto-assigning duty type")
             
             # Update corporate name if detected
             if not booking.corporate:
                 booking.corporate = corporate_info['original_name']
+        else:
+            reasoning_steps.append(f"🔧 DEFAULT CATEGORY: Using P2P (default when no corporate detected)")
         
-        # Determine package format based on keywords and corporate category
-        package_format = self._determine_package_format(booking, email_content, duty_category)
+        reasoning_steps.append(f"")
+        reasoning_steps.append(f"📊 CATEGORY DETERMINATION: {duty_category}")
+        reasoning_steps.append(f"")
+        
+        # Step 3: Determine package format based on keywords and corporate category
+        package_format, package_reasoning = self._determine_package_format_with_reasoning(booking, email_content, duty_category)
+        reasoning_steps.extend(package_reasoning)
         
         # Set the duty_type to the package format
         booking.duty_type = package_format
@@ -1263,34 +1287,68 @@ Return ONLY valid JSON, no additional text."""
         # Set recommended package for backward compatibility
         booking.recommended_package = package_format
         
+        # Store the complete reasoning
+        booking.duty_type_reasoning = "\n".join(reasoning_steps)
+        
         return booking
     
-    def _determine_package_format(self, booking: BookingExtraction, email_content: str, duty_category: str) -> str:
-        """Determine the exact package format based on keywords and G2G/P2P category"""
+    def _determine_package_format_with_reasoning(self, booking: BookingExtraction, email_content: str, duty_category: str) -> tuple[str, list[str]]:
+        """Determine the exact package format based on keywords and G2G/P2P category with detailed reasoning"""
+        reasoning = []
+        reasoning.append("🔍 PACKAGE TYPE ANALYSIS:")
+        reasoning.append("-" * 30)
         
         # Combine all text sources for keyword detection
         combined_text = f"{email_content} {booking.remarks or ''} {booking.additional_info or ''}".lower()
+        reasoning.append(f"📝 Text Sources Analyzed:")
+        reasoning.append(f"   • Email content: {len(email_content)} chars")
+        reasoning.append(f"   • Booking remarks: {len(booking.remarks or '')} chars")
+        reasoning.append(f"   • Additional info: {len(booking.additional_info or '')} chars")
+        reasoning.append(f"")
         
-        # Determine package type based on keywords
+        # Start with default
         package_type = "08HR 80KMS"  # Default fallback
+        reasoning.append(f"🔄 INITIAL DEFAULT: 08HR 80KMS (local disposal)")
         
         # Check for Drop/Airport Transfer keywords
         drop_keywords = ['drop', 'airport transfer', 'airport pickup', 'pickup from airport', 'drop to airport']
-        if any(keyword in combined_text for keyword in drop_keywords):
+        found_drop_keywords = [kw for kw in drop_keywords if kw in combined_text]
+        
+        if found_drop_keywords:
             package_type = "04HR 40KMS"
+            reasoning.append(f"✅ AIRPORT/DROP DETECTED: {package_type}")
+            reasoning.append(f"   Keywords found: {', '.join(found_drop_keywords)}")
+        else:
+            reasoning.append(f"❌ No airport/drop keywords found")
+            reasoning.append(f"   Searched for: {', '.join(drop_keywords)}")
         
         # Check for Local/At disposal keywords
         local_keywords = ['at disposal', 'local use', 'visit', 'whole day use', 'use as per guest instructions', 'local']
-        if any(keyword in combined_text for keyword in local_keywords):
-            package_type = "08HR 80KMS"
+        found_local_keywords = [kw for kw in local_keywords if kw in combined_text]
         
-        # Check for outstation keywords with cities
+        if found_local_keywords:
+            if package_type == "04HR 40KMS":
+                reasoning.append(f"⚠️ LOCAL KEYWORDS FOUND BUT OVERRIDDEN:")
+                reasoning.append(f"   Keywords: {', '.join(found_local_keywords)}")
+                reasoning.append(f"   Airport/drop keywords take priority")
+            else:
+                package_type = "08HR 80KMS"
+                reasoning.append(f"✅ LOCAL/DISPOSAL CONFIRMED: {package_type}")
+                reasoning.append(f"   Keywords found: {', '.join(found_local_keywords)}")
+        else:
+            reasoning.append(f"❌ No local/disposal keywords found")
+            reasoning.append(f"   Searched for: {', '.join(local_keywords)}")
+        
+        reasoning.append(f"")
+        
+        # Check for outstation based on locations
         major_cities = ['mumbai', 'pune', 'hyderabad', 'chennai', 'delhi', 'ahmedabad', 'bangalore']
-        kolkata_and_others = ['kolkata']
-        
-        # Check if it's outstation travel based on from/to locations
         from_city = (booking.from_location or "").lower()
         to_city = (booking.to_location or "").lower()
+        
+        reasoning.append(f"🏙️ LOCATION ANALYSIS:")
+        reasoning.append(f"   From: '{booking.from_location or 'Not specified'}' → '{from_city}'")
+        reasoning.append(f"   To: '{booking.to_location or 'Not specified'}' → '{to_city}'")
         
         is_outstation = False
         is_major_city_outstation = False
@@ -1298,28 +1356,51 @@ Return ONLY valid JSON, no additional text."""
         # Check if from and to are different cities (outstation)
         if from_city and to_city and from_city != to_city:
             is_outstation = True
+            reasoning.append(f"✅ OUTSTATION DETECTED: Different cities")
+            
             # Check if either city is in major cities list
-            if any(city in from_city or city in to_city for city in major_cities):
+            major_city_matches = [city for city in major_cities if city in from_city or city in to_city]
+            if major_city_matches:
                 is_major_city_outstation = True
+                reasoning.append(f"✅ MAJOR CITY ROUTE: {', '.join(major_city_matches)}")
+            else:
+                reasoning.append(f"❌ NOT MAJOR CITY ROUTE")
+        else:
+            reasoning.append(f"❌ NOT OUTSTATION: Same or missing city info")
         
         # Override package type for outstation
         if is_outstation:
             if is_major_city_outstation:
                 package_type = "Outstation 250KMS"
+                reasoning.append(f"🎯 OUTSTATION OVERRIDE: {package_type} (major cities)")
             else:
-                # Check specifically for Kolkata or default to 300KMS for other cities
+                # Check specifically for Kolkata
                 if 'kolkata' in from_city or 'kolkata' in to_city:
                     package_type = "Outstation 300KMS"
+                    reasoning.append(f"🎯 OUTSTATION OVERRIDE: {package_type} (Kolkata route)")
                 else:
-                    package_type = "Outstation 300KMS"  # All other cities
+                    package_type = "Outstation 300KMS"
+                    reasoning.append(f"🎯 OUTSTATION OVERRIDE: {package_type} (other cities)")
         
-        # Combine with G2G or P2P prefix
+        reasoning.append(f"")
+        
+        # Final combination
         package_prefix = duty_category  # G2G or P2P
         final_package = f"{package_prefix}-{package_type}"
         
+        reasoning.append(f"🏁 FINAL DETERMINATION:")
+        reasoning.append(f"   Category: {duty_category}")
+        reasoning.append(f"   Package Type: {package_type}")
+        reasoning.append(f"   Final Result: {final_package}")
+        
         logger.info(f"Package determination: Category={duty_category}, Type={package_type}, Final={final_package}")
         
-        return final_package
+        return final_package, reasoning
+    
+    def _determine_package_format(self, booking: BookingExtraction, email_content: str, duty_category: str) -> str:
+        """Legacy method for backward compatibility - calls the new reasoning method"""
+        package_format, _ = self._determine_package_format_with_reasoning(booking, email_content, duty_category)
+        return package_format
     
     def _map_city_name(self, location: str) -> str:
         """Map location/address to standardized city name with suburb mapping"""
