@@ -70,11 +70,26 @@ class EnhancedFormProcessor:
             # Step 3: Process with AI agent
             result = self.email_processor.process_email(formatted_text)
             
-            # Step 4: Add metadata
-            result.extraction_method = f"enhanced_form_extraction ({file_type or 'unknown'})"
-            result.processing_notes = f"Enhanced form processing: {filename}. Structured fields found: {len(extracted_data.get('key_value_pairs', []))}"
+            # Step 4: Apply enhanced duty type detection
+            try:
+                from enhanced_duty_type_detector import enhance_duty_type_detection
+                from car_rental_ai_agent import CarRentalAIAgent
+                
+                # Create a temporary AI agent for corporate logic (reuse existing logic)
+                temp_agent = CarRentalAIAgent(openai_api_key=self.openai_api_key)
+                
+                # Enhance duty type detection using structured data
+                result = enhance_duty_type_detection(result, temp_agent, formatted_text)
+                
+                logger.info(f"Enhanced duty type detection applied to {filename}")
+            except Exception as e:
+                logger.warning(f"Enhanced duty type detection failed: {str(e)}, continuing with standard detection")
             
-            # Step 5: Add extracted data to additional_info
+            # Step 5: Add metadata
+            result.extraction_method = f"enhanced_form_extraction_with_duty_detection ({file_type or 'unknown'})"
+            result.processing_notes = f"Enhanced form processing: {filename}. Structured fields found: {len(extracted_data.get('key_value_pairs', []))}, Enhanced duty type detection applied"
+            
+            # Step 6: Add extracted data to additional_info
             for booking in result.bookings:
                 document_info = f"Document: {filename}\nStructured Data: {json.dumps(extracted_data, indent=2)}"
                 
