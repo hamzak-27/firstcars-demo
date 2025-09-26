@@ -474,6 +474,21 @@ def main():
     except Exception as e:
         st.warning(f"⚠️ Enhanced form processor initialization failed: {str(e)}")
     
+    # Initialize Multi-Booking processor
+    multi_booking_processor = None
+    try:
+        from enhanced_multi_booking_processor import EnhancedMultiBookingProcessor
+        multi_booking_processor = EnhancedMultiBookingProcessor(openai_api_key=api_key)
+        if hasattr(multi_booking_processor, 'textract_available') and multi_booking_processor.textract_available:
+            st.success("📊 Multi-Booking Table Processing is available! (Complex table layouts with multiple bookings)")
+        else:
+            st.warning("⚠️ Multi-booking processor available but AWS not configured")
+            multi_booking_processor = None
+    except ImportError as e:
+        st.warning(f"⚠️ Multi-booking processing not available: Missing dependencies")
+    except Exception as e:
+        st.warning(f"⚠️ Multi-booking processor initialization failed: {str(e)}")
+    
     # Create tabs based on available processors
     tabs_list = ["Email Processing"]
     if document_processor:
@@ -484,6 +499,8 @@ def main():
         tabs_list.append("Flight Details Processing")
     if enhanced_form_processor:
         tabs_list.append("Enhanced Form Processing")
+    if multi_booking_processor:
+        tabs_list.append("Multi-Booking Tables")
     
     if len(tabs_list) > 1:
         tabs = st.tabs(tabs_list)
@@ -504,6 +521,10 @@ def main():
             tab_idx += 1
         
         tab5 = tabs[tab_idx] if enhanced_form_processor else None  # Enhanced Form Processing
+        if enhanced_form_processor:
+            tab_idx += 1
+        
+        tab6 = tabs[tab_idx] if multi_booking_processor else None  # Multi-Booking Tables
     else:
         # Single email processing interface
         tab1 = st.container()
@@ -511,6 +532,7 @@ def main():
         tab3 = None
         tab4 = None
         tab5 = None
+        tab6 = None
 
     # Tab 1: Email Processing
     with tab1:
@@ -1016,6 +1038,241 @@ def main():
                     - ⚠️ Headers might be captured instead of values
                     - ⚠️ Less accurate for forms
                     """)
+
+    # Tab 6: Multi-Booking Table Processing (if available)
+    if tab6 and multi_booking_processor:
+        with tab6:
+            st.subheader("📊 Multi-Booking Table Extraction")
+            st.info("🚀 Extract multiple bookings from complex table layouts (vertical/horizontal formats) with DataFrame display.")
+            
+            # Import the multi-booking tab functionality
+            try:
+                from streamlit_multi_booking_app import (
+                    bookings_to_dataframe, 
+                    display_extraction_summary,
+                    display_detailed_bookings
+                )
+                
+                # File uploader for multi-booking tables
+                uploaded_multi_file = st.file_uploader(
+                    "Choose a file with multiple bookings (PDF, JPG, PNG, GIF):",
+                    type=['pdf', 'jpg', 'jpeg', 'png', 'gif'],
+                    help="Upload images or PDFs containing tables with multiple booking information",
+                    key="multi_booking_tab_uploader"
+                )
+                
+                if uploaded_multi_file is not None:
+                    # Display file info
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        st.metric("📄 File Name", uploaded_multi_file.name)
+                    with col2:
+                        st.metric("📊 File Size", f"{uploaded_multi_file.size / 1024:.1f} KB")
+                    with col3:
+                        st.metric("🔖 File Type", uploaded_multi_file.type)
+                    
+                    # Process button
+                    if st.button("🔍 Extract All Bookings from Table", type="primary", key="multi_extract_tab"):
+                        # Validate file
+                        is_valid, validation_message = multi_booking_processor.validate_file(
+                            uploaded_multi_file.name, 
+                            uploaded_multi_file.size
+                        )
+                        
+                        if not is_valid:
+                            st.error(f"❌ {validation_message}")
+                        else:
+                            with st.spinner("🤖 Extracting multiple bookings from table..."):
+                                try:
+                                    from datetime import datetime
+                                    start_time = datetime.now()
+                                    
+                                    # Get file content
+                                    file_content = uploaded_multi_file.read()
+                                    file_type = uploaded_multi_file.name.split('.')[-1].lower()
+                                    
+                                    # Process with multi-booking processor
+                                    result = multi_booking_processor.process_multi_booking_document(
+                                        file_content, 
+                                        uploaded_multi_file.name, 
+                                        file_type
+                                    )
+                                    
+                                    processing_time = (datetime.now() - start_time).total_seconds()
+                                    
+                                    # Display results
+                                    st.success(f"✅ Multi-booking extraction completed!")
+                                    
+                                    # Summary metrics
+                                    display_extraction_summary(result, processing_time)
+                                    
+                                    if result.total_bookings_found > 0:
+                                        # Convert to DataFrame and display
+                                        df = bookings_to_dataframe(result.bookings)
+                                        
+                                        st.subheader("📊 Extracted Bookings DataFrame")
+                                        st.markdown("**Dynamic table showing all extracted bookings:**")
+                                        
+                                        # Display the DataFrame with enhanced formatting
+                                        st.dataframe(
+                                            df,
+                                            use_container_width=True,
+                                            height=min(600, (len(df) + 1) * 35),
+                                            column_config={
+                                                "Booking #": st.column_config.NumberColumn("Booking #", width="small"),
+                                                "Passenger Name": st.column_config.TextColumn("Passenger Name", width="medium"),
+                                                "Phone Number": st.column_config.TextColumn("Phone Number", width="medium"),
+                                                "Company": st.column_config.TextColumn("Company", width="medium"),
+                                                "Travel Date": st.column_config.TextColumn("Travel Date", width="medium"),
+                                                "Vehicle Type": st.column_config.TextColumn("Vehicle Type", width="medium"),
+                                                "Duty Type": st.column_config.TextColumn("Duty Type", width="medium"),
+                                                "Confidence": st.column_config.TextColumn("Confidence", width="small"),
+                                            }
+                                        )
+                                        
+                                        # Download options
+                                        st.subheader("💾 Download Extracted Data")
+                                        
+                                        col1, col2, col3 = st.columns(3)
+                                        
+                                        with col1:
+                                            # CSV download
+                                            csv = df.to_csv(index=False)
+                                            st.download_button(
+                                                label="📥 Download CSV",
+                                                data=csv,
+                                                file_name=f"multi_bookings_{uploaded_multi_file.name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                                                mime="text/csv"
+                                            )
+                                        
+                                        with col2:
+                                            # Excel download
+                                            import io
+                                            buffer = io.BytesIO()
+                                            df.to_excel(buffer, index=False, engine='openpyxl')
+                                            excel_data = buffer.getvalue()
+                                            
+                                            st.download_button(
+                                                label="📊 Download Excel",
+                                                data=excel_data,
+                                                file_name=f"multi_bookings_{uploaded_multi_file.name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                                            )
+                                        
+                                        with col3:
+                                            # JSON download
+                                            import json
+                                            json_data = []
+                                            for booking in result.bookings:
+                                                json_data.append({
+                                                    'passenger_name': booking.passenger_name,
+                                                    'passenger_phone': booking.passenger_phone,
+                                                    'corporate': booking.corporate,
+                                                    'start_date': booking.start_date,
+                                                    'reporting_time': booking.reporting_time,
+                                                    'vehicle_group': booking.vehicle_group,
+                                                    'from_location': booking.from_location,
+                                                    'to_location': booking.to_location,
+                                                    'reporting_address': booking.reporting_address,
+                                                    'drop_address': booking.drop_address,
+                                                    'flight_train_number': booking.flight_train_number,
+                                                    'duty_type': booking.duty_type,
+                                                    'remarks': booking.remarks,
+                                                    'confidence_score': booking.confidence_score
+                                                })
+                                            
+                                            json_str = json.dumps(json_data, indent=2)
+                                            st.download_button(
+                                                label="📄 Download JSON",
+                                                data=json_str,
+                                                file_name=f"multi_bookings_{uploaded_multi_file.name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
+                                                mime="application/json"
+                                            )
+                                        
+                                        # Detailed bookings view
+                                        display_detailed_bookings(result.bookings)
+                                        
+                                        # Save to Google Sheets option
+                                        if sheets_success:
+                                            st.subheader("☁️ Google Sheets Integration")
+                                            if st.button("💾 Save All Bookings to Google Sheets", key="multi_tab_save_sheets"):
+                                                success, result_info = save_extraction_results_to_sheets(result)
+                                                if success:
+                                                    total_saved, bookings_processed = result_info
+                                                    st.success(f"✅ Successfully saved {bookings_processed} booking(s) to Google Sheets! Total rows: {total_saved}")
+                                                    st.balloons()
+                                                else:
+                                                    st.error(f"❌ Failed to save to Google Sheets: {result_info}")
+                                    
+                                    else:
+                                        st.warning("⚠️ No bookings could be extracted from this table.")
+                                        
+                                        # Show debug information
+                                        with st.expander("🔍 Debug Information", expanded=False):
+                                            st.text(f"Method: {result.extraction_method}")
+                                            st.text(f"Notes: {result.processing_notes}")
+                                
+                                except Exception as e:
+                                    st.error(f"❌ Multi-booking extraction failed: {str(e)}")
+                                    import traceback
+                                    with st.expander("🔍 Error Details", expanded=False):
+                                        st.text(traceback.format_exc())
+                
+                else:
+                    st.info("📤 Please upload a document containing multiple bookings in table format.")
+                    
+                    # Show supported formats
+                    st.subheader("📋 Supported Multi-Booking Table Formats")
+                    
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        st.markdown("""
+                        **📋 Vertical Layout (Key-Value):**
+                        - Date & City / Car → Travel dates
+                        - Pick up – Time → Reporting times  
+                        - Global Leaders → Passenger names
+                        - Pick up Address → Source locations
+                        - Drop address → Destinations
+                        """)
+                    
+                    with col2:
+                        st.markdown("""
+                        **📊 Horizontal Layout (Columns):**
+                        - Cab 1, Cab 2, Cab 3... → Individual bookings
+                        - Field Names → Row headers
+                        - Each column = One complete booking
+                        - Handles 4+ bookings in single table
+                        """)
+                    
+                    # Features comparison
+                    st.subheader("🆚 Multi-Booking vs Single Booking")
+                    
+                    feature_col1, feature_col2 = st.columns(2)
+                    
+                    with feature_col1:
+                        st.markdown("""
+                        **📊 Multi-Booking Processing:**
+                        - ✅ Extracts multiple bookings per document
+                        - ✅ Handles complex table layouts
+                        - ✅ Dynamic DataFrame display
+                        - ✅ Bulk download options (CSV/Excel/JSON)
+                        - ✅ Perfect for team travel schedules
+                        """)
+                    
+                    with feature_col2:
+                        st.markdown("""
+                        **📋 Single Booking Processing:**
+                        - ✅ Extracts one booking per document
+                        - ✅ Simple form processing
+                        - ✅ Detailed individual analysis
+                        - ✅ Perfect for individual travel requests
+                        - ✅ Enhanced duty type detection
+                        """)
+            
+            except ImportError as e:
+                st.error(f"❌ Could not load multi-booking functionality: {str(e)}")
+                st.info("Please ensure all required dependencies are installed.")
 
 if __name__ == "__main__":
     main()
