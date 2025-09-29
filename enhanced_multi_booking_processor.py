@@ -18,8 +18,8 @@ logger = logging.getLogger(__name__)
 class EnhancedMultiBookingProcessor(EnhancedFormProcessor):
     """Enhanced processor for multi-booking tables with complex layouts"""
     
-    def __init__(self, aws_region: str = 'us-east-1', openai_api_key: str = None):
-        super().__init__(aws_region, openai_api_key)
+    def __init__(self, aws_region: str = None):
+        super().__init__(aws_region, None)
         
         # Field mappings for different table layouts
         self.field_mappings = {
@@ -77,10 +77,10 @@ class EnhancedMultiBookingProcessor(EnhancedFormProcessor):
                 result = self.email_processor.process_email(formatted_text)
                 bookings = result.bookings
             
-            # Step 3: Apply enhanced duty type detection to each booking
+            # Step 3: Apply enhanced duty type detection to each booking (without OpenAI)
             try:
-                from car_rental_ai_agent import CarRentalAIAgent
-                temp_agent = CarRentalAIAgent(openai_api_key=self.openai_api_key)
+                from enhanced_duty_type_detector import EnhancedDutyTypeDetector
+                duty_detector = EnhancedDutyTypeDetector()
                 
                 for booking in bookings:
                     # Create a mock result for duty type detection
@@ -98,12 +98,12 @@ class EnhancedMultiBookingProcessor(EnhancedFormProcessor):
                         booking.additional_info = ""
                     booking.additional_info += f"\\nStructured Data: {json.dumps(extracted_data, indent=2)}"
                     
-                    # Enhance duty type detection
-                    enhanced_result = enhance_duty_type_detection(mock_result, temp_agent, "")
-                    if enhanced_result.bookings:
-                        enhanced_booking = enhanced_result.bookings[0]
-                        booking.duty_type = enhanced_booking.duty_type
-                        booking.duty_type_reasoning = enhanced_booking.duty_type_reasoning
+                    # Use enhanced duty type detection (no OpenAI required)
+                    duty_result = duty_detector.detect_duty_type_from_structured_data(mock_result, "")
+                    if duty_result:
+                        booking.duty_type = duty_result['duty_type']
+                        booking.duty_type_reasoning = duty_result['reasoning']
+                        booking.confidence_score = duty_result['confidence']
                 
                 logger.info(f"Enhanced duty type detection applied to {len(bookings)} bookings")
             except Exception as e:

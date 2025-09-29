@@ -490,7 +490,7 @@ def main():
         st.warning(f"⚠️ Multi-booking processor initialization failed: {str(e)}")
     
     # Create tabs based on available processors
-    tabs_list = ["Email Processing"]
+    tabs_list = ["Email Processing", "Classification"]
     if document_processor:
         tabs_list.append("Document Processing (S3+Textract)")
     if docx_processor:
@@ -505,9 +505,10 @@ def main():
     if len(tabs_list) > 1:
         tabs = st.tabs(tabs_list)
         tab1 = tabs[0]  # Email Processing
+        tab_classification = tabs[1]  # Classification (always second tab)
         
-        # Assign tabs based on availability
-        tab_idx = 1
+        # Assign remaining tabs based on availability
+        tab_idx = 2
         tab2 = tabs[tab_idx] if document_processor else None  # Document Processing
         if document_processor:
             tab_idx += 1
@@ -528,6 +529,7 @@ def main():
     else:
         # Single email processing interface
         tab1 = st.container()
+        tab_classification = None
         tab2 = None
         tab3 = None
         tab4 = None
@@ -608,6 +610,359 @@ def main():
             
             elif not st.session_state.extraction_done:
                 st.info("👈 Enter email content and click 'Extract Data' to see results here.")
+    
+    # Classification Tab
+    if tab_classification:
+        with tab_classification:
+            st.subheader("🎯 Booking Classification")
+            st.markdown("**Predict how many bookings will be created from your content**")
+            st.info("📊 This agent analyzes text, images, or PDFs to predict single vs multiple bookings based on your business rules.")
+            
+            # Initialize classification agent
+            try:
+                from booking_classification_agent import BookingClassificationAgent
+                classifier = BookingClassificationAgent()
+            except ImportError:
+                st.error("❌ Classification agent not available")
+                st.stop()
+            
+            # Create sub-tabs for different input types
+            class_tabs = st.tabs(["📝 Text Classification", "🖼️ Image Classification", "📄 PDF Classification"])
+            
+            # Text Classification Tab
+            with class_tabs[0]:
+                st.subheader("📝 Text Content Classification")
+                
+                col1, col2 = st.columns([1, 1])
+                
+                with col1:
+                    st.markdown("**📋 Paste Your Content**")
+                    text_content = st.text_area(
+                        "Enter text content to classify:",
+                        height=300,
+                        placeholder="Example:\n\nNeed cab for outstation trip from Delhi to Gurgaon for 3 days.\nOR\nNeed 2 drops today - one at 9 AM to airport and another at 6 PM to hotel.",
+                        key="text_classification_input"
+                    )
+                    
+                    col_btn1, col_btn2 = st.columns(2)
+                    with col_btn1:
+                        classify_text_btn = st.button("🎯 Classify Text", type="primary", use_container_width=True, key="classify_text")
+                    with col_btn2:
+                        clear_text_btn = st.button("🗑️ Clear", use_container_width=True, key="clear_text_classification")
+                
+                with col2:
+                    st.markdown("**📊 Classification Result**")
+                    
+                    # Initialize session state for text classification
+                    if 'text_classification_result' not in st.session_state:
+                        st.session_state.text_classification_result = None
+                    if 'text_classification_done' not in st.session_state:
+                        st.session_state.text_classification_done = False
+                    
+                    # Clear functionality
+                    if clear_text_btn:
+                        st.session_state.text_classification_result = None
+                        st.session_state.text_classification_done = False
+                        st.rerun()
+                    
+                    # Classify text
+                    if classify_text_btn and text_content.strip():
+                        with st.spinner("🤖 Analyzing text content..."):
+                            try:
+                                result = classifier.classify_text_content(text_content.strip())
+                                st.session_state.text_classification_result = result
+                                st.session_state.text_classification_done = True
+                            except Exception as e:
+                                st.error(f"❌ Classification failed: {str(e)}")
+                                st.session_state.text_classification_result = None
+                                st.session_state.text_classification_done = False
+                    
+                    elif classify_text_btn and not text_content.strip():
+                        st.warning("⚠️ Please enter some text content first.")
+                    
+                    # Display classification results
+                    if st.session_state.text_classification_done and st.session_state.text_classification_result:
+                        result = st.session_state.text_classification_result
+                        
+                        # Main result display
+                        col_res1, col_res2, col_res3 = st.columns(3)
+                        with col_res1:
+                            st.metric("📊 Predicted Bookings", result.predicted_booking_count)
+                        with col_res2:
+                            booking_icon = "🔀" if result.booking_type == "multiple" else "📋"
+                            st.metric(f"{booking_icon} Type", result.booking_type.title())
+                        with col_res3:
+                            confidence_color = "🟢" if result.confidence_score > 0.8 else "🟡" if result.confidence_score > 0.6 else "🔴"
+                            st.metric(f"{confidence_color} Confidence", f"{result.confidence_score:.1%}")
+                        
+                        # Reasoning
+                        st.markdown("**🧠 Analysis Reasoning:**")
+                        st.info(result.reasoning)
+                        
+                        # Additional details in expandable section
+                        with st.expander("🔍 Detailed Analysis", expanded=False):
+                            if result.duty_type_indicators:
+                                st.write(f"**🚗 Duty Type Indicators:** {', '.join(result.duty_type_indicators)}")
+                            if result.date_patterns:
+                                st.write(f"**📅 Date Patterns:** {', '.join(result.date_patterns)}")
+                            if result.detected_patterns:
+                                st.write("**🔍 Detected Patterns:**")
+                                for pattern in result.detected_patterns:
+                                    st.write(f"• {pattern}")
+                            if result.additional_info:
+                                st.write(f"**ℹ️ Additional Info:** {result.additional_info}")
+                    
+                    elif not st.session_state.text_classification_done:
+                        st.info("👈 Enter text content and click 'Classify Text' to see predictions here.")
+            
+            # Image Classification Tab
+            with class_tabs[1]:
+                st.subheader("🖼️ Image Content Classification")
+                
+                if not document_processor:
+                    st.warning("⚠️ Image classification requires Document Processing (S3+Textract) to be available.")
+                else:
+                    uploaded_image = st.file_uploader(
+                        "Choose an image file:",
+                        type=['jpg', 'jpeg', 'png', 'gif'],
+                        help="Upload images containing booking information (screenshots, forms, tables)",
+                        key="image_classification_uploader"
+                    )
+                    
+                    if uploaded_image is not None:
+                        # Display image info
+                        col1, col2, col3 = st.columns(3)
+                        with col1:
+                            st.metric("📄 File Name", uploaded_image.name)
+                        with col2:
+                            st.metric("📊 File Size", f"{uploaded_image.size / 1024:.1f} KB")
+                        with col3:
+                            st.metric("🔖 File Type", uploaded_image.type)
+                        
+                        # Show image preview
+                        st.image(uploaded_image, caption="Uploaded Image", use_column_width=True)
+                        
+                        # Classify button
+                        if st.button("🎯 Classify Image", type="primary", key="classify_image"):
+                            # Validate file
+                            is_valid, validation_message = document_processor.validate_file(
+                                uploaded_image.name, 
+                                uploaded_image.size
+                            )
+                            
+                            if not is_valid:
+                                st.error(f"❌ {validation_message}")
+                            else:
+                                with st.spinner("🤖 Processing image with S3 + Textract + Classification..."):
+                                    try:
+                                        # Get file content
+                                        file_content = uploaded_image.read()
+                                        file_type = uploaded_image.name.split('.')[-1].lower()
+                                        
+                                        # Check if multi-booking processor is available for table detection
+                                        if multi_booking_processor:
+                                            # Use multi-booking processor for better table detection
+                                            result = multi_booking_processor.process_multi_booking_document(
+                                                file_content, uploaded_image.name, file_type
+                                            )
+                                            
+                                            # Classify based on actual extraction results
+                                            classification_result = classifier.classify_from_extraction_result(result)
+                                            
+                                            # Display results
+                                            st.success(f"✅ Image classification completed!")
+                                            
+                                            # Show classification results
+                                            col_res1, col_res2, col_res3 = st.columns(3)
+                                            with col_res1:
+                                                st.metric("📊 Predicted Bookings", classification_result.predicted_booking_count)
+                                            with col_res2:
+                                                booking_icon = "🔀" if classification_result.booking_type == "multiple" else "📋"
+                                                st.metric(f"{booking_icon} Type", classification_result.booking_type.title())
+                                            with col_res3:
+                                                confidence_color = "🟢" if classification_result.confidence_score > 0.8 else "🟡" if classification_result.confidence_score > 0.6 else "🔴"
+                                                st.metric(f"{confidence_color} Confidence", f"{classification_result.confidence_score:.1%}")
+                                            
+                                            st.info(f"**🧠 Analysis:** {classification_result.reasoning}")
+                                            
+                                            # Show DataFrame if multiple bookings detected
+                                            if result.total_bookings_found > 1:
+                                                from streamlit_multi_booking_app import bookings_to_dataframe
+                                                df = bookings_to_dataframe(result.bookings)
+                                                st.subheader(f"📊 Detected Bookings ({len(df)} rows)")
+                                                st.dataframe(df, use_container_width=True)
+                                            
+                                            # Show detailed analysis
+                                            with st.expander("🔍 Detailed Analysis", expanded=False):
+                                                st.write(f"**📋 Actual Bookings Found:** {result.total_bookings_found}")
+                                                if classification_result.additional_info:
+                                                    st.write(f"**ℹ️ Additional Info:** {classification_result.additional_info}")
+                                                if result.processing_notes:
+                                                    st.write(f"**🔧 Processing Notes:** {result.processing_notes}")
+                                        
+                                        else:
+                                            # Fallback to regular document processing
+                                            result = document_processor.process_document(
+                                                file_content, uploaded_image.name, file_type
+                                            )
+                                            
+                                            # Classify based on extraction results
+                                            classification_result = classifier.classify_from_extraction_result(result)
+                                            
+                                            # Display results
+                                            st.success(f"✅ Image classification completed!")
+                                            
+                                            col_res1, col_res2, col_res3 = st.columns(3)
+                                            with col_res1:
+                                                st.metric("📊 Predicted Bookings", classification_result.predicted_booking_count)
+                                            with col_res2:
+                                                booking_icon = "🔀" if classification_result.booking_type == "multiple" else "📋"
+                                                st.metric(f"{booking_icon} Type", classification_result.booking_type.title())
+                                            with col_res3:
+                                                confidence_color = "🟢" if classification_result.confidence_score > 0.8 else "🟡" if classification_result.confidence_score > 0.6 else "🔴"
+                                                st.metric(f"{confidence_color} Confidence", f"{classification_result.confidence_score:.1%}")
+                                            
+                                            st.info(f"**🧠 Analysis:** {classification_result.reasoning}")
+                                    
+                                    except Exception as e:
+                                        st.error(f"❌ Image classification failed: {str(e)}")
+                    else:
+                        st.info("📤 Please upload an image file to begin classification.")
+            
+            # PDF Classification Tab
+            with class_tabs[2]:
+                st.subheader("📄 PDF Content Classification")
+                
+                if not document_processor:
+                    st.warning("⚠️ PDF classification requires Document Processing (S3+Textract) to be available.")
+                else:
+                    uploaded_pdf = st.file_uploader(
+                        "Choose a PDF file:",
+                        type=['pdf'],
+                        help="Upload PDF files containing booking information (forms, tables, email screenshots)",
+                        key="pdf_classification_uploader"
+                    )
+                    
+                    if uploaded_pdf is not None:
+                        # Display PDF info
+                        col1, col2, col3 = st.columns(3)
+                        with col1:
+                            st.metric("📄 File Name", uploaded_pdf.name)
+                        with col2:
+                            st.metric("📊 File Size", f"{uploaded_pdf.size / 1024:.1f} KB")
+                        with col3:
+                            st.metric("🔖 File Type", uploaded_pdf.type)
+                        
+                        # Classify button
+                        if st.button("🎯 Classify PDF", type="primary", key="classify_pdf"):
+                            # Validate file
+                            is_valid, validation_message = document_processor.validate_file(
+                                uploaded_pdf.name, 
+                                uploaded_pdf.size
+                            )
+                            
+                            if not is_valid:
+                                st.error(f"❌ {validation_message}")
+                            else:
+                                with st.spinner("🤖 Processing PDF with S3 + Textract + Classification..."):
+                                    try:
+                                        # Get file content
+                                        file_content = uploaded_pdf.read()
+                                        file_type = 'pdf'
+                                        
+                                        # Check if multi-booking processor is available for table detection
+                                        if multi_booking_processor:
+                                            # Use multi-booking processor for better table detection
+                                            result = multi_booking_processor.process_multi_booking_document(
+                                                file_content, uploaded_pdf.name, file_type
+                                            )
+                                            
+                                            # Classify based on actual extraction results
+                                            classification_result = classifier.classify_from_extraction_result(result)
+                                            
+                                            # Display results
+                                            st.success(f"✅ PDF classification completed!")
+                                            
+                                            # Show classification results
+                                            col_res1, col_res2, col_res3 = st.columns(3)
+                                            with col_res1:
+                                                st.metric("📊 Predicted Bookings", classification_result.predicted_booking_count)
+                                            with col_res2:
+                                                booking_icon = "🔀" if classification_result.booking_type == "multiple" else "📋"
+                                                st.metric(f"{booking_icon} Type", classification_result.booking_type.title())
+                                            with col_res3:
+                                                confidence_color = "🟢" if classification_result.confidence_score > 0.8 else "🟡" if classification_result.confidence_score > 0.6 else "🔴"
+                                                st.metric(f"{confidence_color} Confidence", f"{classification_result.confidence_score:.1%}")
+                                            
+                                            st.info(f"**🧠 Analysis:** {classification_result.reasoning}")
+                                            
+                                            # Show DataFrame if multiple bookings detected
+                                            if result.total_bookings_found > 1:
+                                                from streamlit_multi_booking_app import bookings_to_dataframe
+                                                df = bookings_to_dataframe(result.bookings)
+                                                st.subheader(f"📊 Detected Bookings ({len(df)} rows)")
+                                                st.dataframe(df, use_container_width=True)
+                                            
+                                            # Show detailed analysis
+                                            with st.expander("🔍 Detailed Analysis", expanded=False):
+                                                st.write(f"**📋 Actual Bookings Found:** {result.total_bookings_found}")
+                                                if classification_result.additional_info:
+                                                    st.write(f"**ℹ️ Additional Info:** {classification_result.additional_info}")
+                                                if result.processing_notes:
+                                                    st.write(f"**🔧 Processing Notes:** {result.processing_notes}")
+                                        
+                                        else:
+                                            # Fallback to regular document processing
+                                            result = document_processor.process_document(
+                                                file_content, uploaded_pdf.name, file_type
+                                            )
+                                            
+                                            # Classify based on extraction results
+                                            classification_result = classifier.classify_from_extraction_result(result)
+                                            
+                                            # Display results
+                                            st.success(f"✅ PDF classification completed!")
+                                            
+                                            col_res1, col_res2, col_res3 = st.columns(3)
+                                            with col_res1:
+                                                st.metric("📊 Predicted Bookings", classification_result.predicted_booking_count)
+                                            with col_res2:
+                                                booking_icon = "🔀" if classification_result.booking_type == "multiple" else "📋"
+                                                st.metric(f"{booking_icon} Type", classification_result.booking_type.title())
+                                            with col_res3:
+                                                confidence_color = "🟢" if classification_result.confidence_score > 0.8 else "🟡" if classification_result.confidence_score > 0.6 else "🔴"
+                                                st.metric(f"{confidence_color} Confidence", f"{classification_result.confidence_score:.1%}")
+                                            
+                                            st.info(f"**🧠 Analysis:** {classification_result.reasoning}")
+                                    
+                                    except Exception as e:
+                                        st.error(f"❌ PDF classification failed: {str(e)}")
+                    else:
+                        st.info("📤 Please upload a PDF file to begin classification.")
+            
+            # Business Rules Information
+            st.markdown("---")
+            st.subheader("📋 Classification Business Rules")
+            
+            col_rules1, col_rules2 = st.columns(2)
+            
+            with col_rules1:
+                st.markdown("""
+                **📋 Single Booking Scenarios:**
+                - ✅ 8/80 or outstation package for consecutive days
+                - ✅ Single 4/40 drop in a day
+                - ✅ Same car type for entire duration
+                - ✅ Continuous multi-day travel
+                """)
+            
+            with col_rules2:
+                st.markdown("""
+                **🔀 Multiple Booking Scenarios:**
+                - ✅ Two or more drops in same day
+                - ✅ 8/80 for alternate (non-consecutive) days
+                - ✅ Different car types on different days
+                - ✅ Tables with multiple rows/columns
+                """)
     
     # Tab 2: Document Processing (S3+Textract) if available
     if document_processor and tab2:

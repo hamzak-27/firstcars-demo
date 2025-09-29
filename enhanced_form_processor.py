@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 class EnhancedFormProcessor:
     """Enhanced processor focusing on form extraction and table structure preservation"""
     
-    def __init__(self, aws_region: str = 'us-east-1', openai_api_key: str = None):
+    def __init__(self, aws_region: str = None, openai_api_key: str = None):
         """
         Initialize enhanced form processor
         
@@ -26,15 +26,37 @@ class EnhancedFormProcessor:
             aws_region: AWS region for Textract
             openai_api_key: OpenAI API key for AI processing
         """
+        # Auto-detect AWS region if not specified
+        if aws_region is None:
+            session = boto3.Session()
+            aws_region = session.region_name or 'us-east-1'
+        
         self.aws_region = aws_region
         self.openai_api_key = openai_api_key or os.getenv('OPENAI_API_KEY')
+        # Initialize email processor with None if no OpenAI key
         self.email_processor = UnifiedEmailProcessor(openai_api_key)
         
         # Initialize AWS Textract client
         try:
             self.textract_client = boto3.client('textract', region_name=aws_region)
-            self.textract_available = True
-            logger.info(f"AWS Textract initialized for region: {aws_region}")
+            
+            # Test the credentials with a simple call
+            try:
+                self.textract_client.get_document_analysis(JobId='test-job-id')
+            except ClientError as test_error:
+                if test_error.response['Error']['Code'] == 'InvalidJobIdException':
+                    # This means credentials work, just invalid job ID
+                    self.textract_available = True
+                    logger.info(f"AWS Textract initialized for region: {aws_region}")
+                elif test_error.response['Error']['Code'] == 'UnrecognizedClientException':
+                    # Invalid credentials
+                    logger.warning(f"AWS Textract credentials invalid: {str(test_error)}")
+                    self.textract_available = False
+                else:
+                    # Other permission issues
+                    logger.warning(f"AWS Textract permission issue: {str(test_error)}")
+                    self.textract_available = False
+                    
         except (NoCredentialsError, ClientError) as e:
             logger.warning(f"AWS Textract not available: {str(e)}")
             self.textract_available = False
@@ -70,16 +92,33 @@ class EnhancedFormProcessor:
             # Step 3: Process with AI agent
             result = self.email_processor.process_email(formatted_text)
             
-            # Step 4: Apply enhanced duty type detection
+            # Step 4: Apply enhanced duty type detection (without OpenAI dependency)
             try:
-                from enhanced_duty_type_detector import enhance_duty_type_detection
-                from car_rental_ai_agent import CarRentalAIAgent
+                from enhanced_duty_type_detector import EnhancedDutyTypeDetector
+                duty_detector = EnhancedDutyTypeDetector()
                 
-                # Create a temporary AI agent for corporate logic (reuse existing logic)
-                temp_agent = CarRentalAIAgent(openai_api_key=self.openai_api_key)
-                
-                # Enhance duty type detection using structured data
-                result = enhance_duty_type_detection(result, temp_agent, formatted_text)
+                # Apply enhanced duty type detection to each booking
+                for booking in result.bookings:
+                    # Add extracted data for duty type detection
+                    if not booking.additional_info:
+                        booking.additional_info = ""
+                    booking.additional_info += f"\nStructured Data: {json.dumps(extracted_data, indent=2)}"
+                    
+                    # Create mock result for duty type detection
+                    mock_result = StructuredExtractionResult(
+                        bookings=[booking],
+                        total_bookings_found=1,
+                        extraction_method="enhanced_form_processing",
+                        confidence_score=0.8,
+                        processing_notes=""
+                    )
+                    
+                    # Detect duty type from structured data
+                    duty_result = duty_detector.detect_duty_type_from_structured_data(mock_result, formatted_text)
+                    if duty_result:
+                        booking.duty_type = duty_result['duty_type']
+                        booking.duty_type_reasoning = duty_result['reasoning']
+                        booking.confidence_score = duty_result['confidence']
                 
                 logger.info(f"Enhanced duty type detection applied to {filename}")
             except Exception as e:
@@ -108,11 +147,19 @@ class EnhancedFormProcessor:
     def _extract_structured_data(self, file_content: bytes, filename: str) -> Dict[str, Any]:
         """Extract structured data using Textract FORMS and TABLES"""
         try:
+            logger.info(f"Starting Textract analysis for {filename} (size: {len(file_content)} bytes)")
+            
             # Use analyze_document with both FORMS and TABLES features
             response = self.textract_client.analyze_document(
                 Document={'Bytes': file_content},
                 FeatureTypes=['FORMS', 'TABLES']
             )
+            
+            logger.info(f"Textract analysis completed for {filename}")
+            
+            # Count total blocks
+            total_blocks = len(response.get('Blocks', []))
+            logger.info(f"Total blocks returned by Textract: {total_blocks}")
             
             # Extract structured data
             extracted_data = {
@@ -122,10 +169,20 @@ class EnhancedFormProcessor:
             }
             
             logger.info(f"Extracted {len(extracted_data['key_value_pairs'])} key-value pairs and {len(extracted_data['tables'])} tables from {filename}")
+            logger.info(f"Raw text length: {len(extracted_data.get('raw_text', ''))} characters")
+            
+            # Log some sample data for debugging
+            if extracted_data['raw_text']:
+                sample_text = extracted_data['raw_text'][:200] + '...' if len(extracted_data['raw_text']) > 200 else extracted_data['raw_text']
+                logger.debug(f"Sample extracted text: {sample_text}")
+            
+            if not any([extracted_data['key_value_pairs'], extracted_data['tables'], extracted_data['raw_text']]):
+                logger.warning(f"No structured data extracted from {filename} despite {total_blocks} blocks returned")
+            
             return extracted_data
             
         except Exception as e:
-            logger.error(f"Structured data extraction failed: {str(e)}")
+            logger.error(f"Structured data extraction failed for {filename}: {str(e)}", exc_info=True)
             return {}
 
     def _extract_key_value_pairs(self, response: dict) -> List[Dict[str, str]]:

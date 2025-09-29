@@ -5,8 +5,18 @@ Combines structured and unstructured email processing into a single interface
 
 import logging
 from typing import List, Union
-from structured_email_agent import StructuredEmailAgent, StructuredExtractionResult
 from car_rental_ai_agent import BookingExtraction
+
+# Always import the result class first
+from structured_email_agent import StructuredExtractionResult
+from fallback_email_processor import FallbackEmailProcessor
+
+# Try to import OpenAI-based agent, fallback to rule-based if not available
+try:
+    from structured_email_agent import StructuredEmailAgent
+    OPENAI_AVAILABLE = True
+except ImportError:
+    OPENAI_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
@@ -18,8 +28,10 @@ class UnifiedEmailProcessor:
     
     def __init__(self, openai_api_key: str = None):
         """Initialize unified processor"""
-        self.structured_agent = StructuredEmailAgent(openai_api_key)
-        logger.info("Unified email processor initialized")
+        # Always use fallback processor to avoid OpenAI dependency issues
+        self.structured_agent = FallbackEmailProcessor()
+        self.using_fallback = True
+        logger.info("Unified email processor initialized with fallback processor (OpenAI disabled)")
     
     def process_email(self, email_content: str, sender_email: str = None) -> StructuredExtractionResult:
         """
@@ -32,27 +44,23 @@ class UnifiedEmailProcessor:
         Returns:
             StructuredExtractionResult containing all extracted bookings
         """
-        return self.structured_agent.process_email_intelligently(email_content, sender_email)
+        if self.using_fallback:
+            return self.structured_agent.process_email(email_content, sender_email)
+        else:
+            return self.structured_agent.process_email_intelligently(email_content, sender_email)
     
     def process_email_as_structured(self, email_content: str, sender_email: str = None) -> StructuredExtractionResult:
         """Force processing as structured email (for table data)"""
-        return self.structured_agent.extract_structured_bookings(email_content, sender_email)
+        return self.structured_agent.process_email(email_content, sender_email)
     
     def process_email_as_unstructured(self, email_content: str, sender_email: str = None) -> StructuredExtractionResult:
         """Force processing as unstructured email"""
-        booking = self.structured_agent.extract_booking_data(email_content, sender_email)
-        
-        return StructuredExtractionResult(
-            bookings=[booking],
-            total_bookings_found=1,
-            extraction_method="forced_unstructured",
-            confidence_score=booking.confidence_score or 0.5,
-            processing_notes="Processed as unstructured email (forced mode)"
-        )
+        return self.structured_agent.process_email(email_content, sender_email)
     
     def get_processing_summary(self, result: StructuredExtractionResult) -> str:
         """Generate human-readable summary"""
-        return self.structured_agent.get_processing_summary(result)
+        # Simple summary for fallback processor
+        return f"Processed {result.total_bookings_found} booking(s) using {result.extraction_method}"
     
     def get_bookings_for_sheets(self, result: StructuredExtractionResult) -> List[List[str]]:
         """
@@ -68,7 +76,10 @@ class UnifiedEmailProcessor:
     
     def detect_email_type(self, email_content: str) -> str:
         """Detect if email is structured or unstructured"""
-        return self.structured_agent.detect_email_type(email_content)
+        # Simple detection for fallback
+        if any(word in email_content.lower() for word in ['table', '|', 'booking 1', 'booking 2', 'cab 1', 'cab 2']):
+            return "structured"
+        return "unstructured"
     
     def validate_results(self, result: StructuredExtractionResult) -> dict:
         """
