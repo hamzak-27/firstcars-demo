@@ -408,7 +408,34 @@ class EnhancedMultiBookingProcessor(EnhancedFormProcessor):
                 logger.warning(f"Table has no headers ({len(headers)}) or no rows ({len(rows)})")
                 return bookings
             
-            logger.info(f"Processing horizontal table with {len(headers)} columns and {len(rows)} rows")
+            logger.info(f"Processing table with {len(headers)} columns and {len(rows)} rows")
+            
+            # CRITICAL: Detect if this is actually a vertical layout table
+            # Vertical layout indicators:
+            # 1. Headers contain standard field names (Date, Name, Contact, etc.) instead of booking numbers
+            # 2. Multiple data rows where each row represents a booking
+            # 3. No 'Cab 1', 'Cab 2' style headers
+            
+            vertical_layout_indicators = [
+                'date', 'name', 'contact', 'address', 'time', 'location', 
+                'pickup', 'drop', 'passenger', 'phone', 'sr.', 'sr'
+            ]
+            
+            header_text = ' '.join(str(h).lower() for h in headers if h)
+            has_vertical_indicators = any(indicator in header_text for indicator in vertical_layout_indicators)
+            has_horizontal_indicators = any(pattern in header_text for pattern in ['cab 1', 'cab 2', 'cab 3', 'booking 1', 'booking 2'])
+            
+            # Check if we have multiple data rows (excluding header row)
+            data_rows = [row for row in rows[1:] if row and any(str(cell).strip() for cell in row)]
+            has_multiple_data_rows = len(data_rows) >= 2
+            
+            if has_vertical_indicators and not has_horizontal_indicators and has_multiple_data_rows:
+                logger.info(f"🔄 DETECTED VERTICAL LAYOUT: Converting to vertical processing")
+                logger.info(f"Vertical indicators: {[ind for ind in vertical_layout_indicators if ind in header_text]}")
+                logger.info(f"Data rows: {len(data_rows)}")
+                return self._extract_from_vertical_layout_table(table)
+            
+            logger.info(f"Processing as horizontal layout with {len(headers)} columns and {len(rows)} rows")
             
             # Identify booking columns (Cab 1, Cab 2, etc.)
             booking_columns = []
@@ -479,7 +506,7 @@ class EnhancedMultiBookingProcessor(EnhancedFormProcessor):
                     
                     logger.info(f"Extracting booking data from column {col_idx} ('{header_name}')")
                     
-                    # Extract field-value pairs for this booking
+            # Extract field-value pairs for this booking
                     for row_idx, row in enumerate(rows):
                         if row_idx == 0:  # Skip header row
                             continue
@@ -488,6 +515,11 @@ class EnhancedMultiBookingProcessor(EnhancedFormProcessor):
                             # The field name is in column 1 (index 1), not column 0
                             field_name = row[1].strip().lower() if len(row) > 1 and row[1] else ""
                             field_value = row[col_idx].strip() if col_idx < len(row) and row[col_idx] else ""
+                            
+                            # Skip if field_value is actually a header/field name instead of data
+                            if self._is_header_value(field_value):
+                                logger.info(f"Skipping header value: '{field_value}' in column {col_idx}")
+                                continue
                             
                             logger.info(f"Row {row_idx}, Col {col_idx}: Field='{field_name}', Value='{field_value}'")
                             
@@ -521,6 +553,75 @@ class EnhancedMultiBookingProcessor(EnhancedFormProcessor):
         
         except Exception as e:
             logger.error(f"Error extracting from horizontal table: {str(e)}")
+        
+        return bookings
+    
+    def _extract_from_vertical_layout_table(self, table: Dict[str, Any]) -> List[BookingExtraction]:
+        """Extract bookings from vertical layout table (each row is a booking)"""
+        bookings = []
+        
+        try:
+            headers = table.get('headers', [])
+            rows = table.get('rows', [])
+            
+            if not headers or not rows:
+                logger.warning(f"Vertical table has no headers ({len(headers)}) or no rows ({len(rows)})")
+                return bookings
+            
+            logger.info(f"Processing vertical layout with {len(headers)} columns and {len(rows)} rows")
+            logger.info(f"Headers: {headers}")
+            
+            # Create field mapping from headers
+            header_mapping = {}
+            for i, header in enumerate(headers):
+                if header and str(header).strip():
+                    mapped_field = self._map_field_name(str(header).strip())
+                    if mapped_field:
+                        header_mapping[i] = mapped_field
+                        logger.info(f"Column {i} ('{header}') mapped to '{mapped_field}'")
+            
+            # Process each data row (skip header row)
+            for row_idx, row in enumerate(rows[1:], 1):  # Skip first row (headers)
+                if not row or not any(str(cell).strip() for cell in row):
+                    continue  # Skip empty rows
+                
+                logger.info(f"Processing row {row_idx}: {row}")
+                
+                booking_data = {}
+                
+                # Extract data from each column using header mapping
+                for col_idx, cell_value in enumerate(row):
+                    if col_idx in header_mapping and cell_value and str(cell_value).strip():
+                        field_name = header_mapping[col_idx]
+                        field_value = str(cell_value).strip()
+                        
+                        # Skip meaningless values
+                        if field_value.lower() in ['na', 'n/a', '-', '']:
+                            continue
+                        
+                        # Handle customer field mapping to corporate
+                        if field_name == 'customer':
+                            booking_data['corporate'] = field_value
+                        else:
+                            booking_data[field_name] = field_value
+                        
+                        logger.info(f"Row {row_idx}, Col {col_idx}: {field_name} = '{field_value}'")
+                
+                logger.info(f"Extracted data for booking {len(bookings)+1}: {list(booking_data.keys())}")
+                
+                # Create booking from extracted data
+                if booking_data:
+                    booking = self._create_booking_from_data(booking_data)
+                    if booking:
+                        bookings.append(booking)
+                        logger.info(f"Successfully created booking {len(bookings)} from row {row_idx}")
+                    else:
+                        logger.warning(f"Failed to create booking from data: {booking_data}")
+                else:
+                    logger.warning(f"No valid booking data found in row {row_idx}")
+        
+        except Exception as e:
+            logger.error(f"Error extracting from vertical layout table: {str(e)}")
         
         return bookings
     
@@ -607,6 +708,37 @@ class EnhancedMultiBookingProcessor(EnhancedFormProcessor):
         
         return groups if len(groups) > 1 else [kv_pairs]  # If only one group, return all as single booking
     
+    def _is_header_value(self, value: str) -> bool:
+        """Check if a cell value is actually a header/field name rather than booking data"""
+        if not value or not value.strip():
+            return False
+        
+        value_lower = value.lower().strip()
+        
+        # Common header/field indicators
+        header_patterns = [
+            'name of employee', 'contact number', 'date of travel', 'pick-up time',
+            'cab type', 'pick-up address', 'drop at', 'flight details', 'company name',
+            'passenger name', 'phone number', 'pickup address', 'drop address',
+            'vehicle type', 'vehicle group', 'reporting time', 'from location',
+            'to location', 'start date', 'end date', 'field name', 'attribute',
+            'description', 'column header', 'data field'
+        ]
+        
+        # Check if value matches typical field names
+        if any(pattern in value_lower for pattern in header_patterns):
+            return True
+        
+        # Check if value looks like a field name (ends with colon, has specific format)
+        if value_lower.endswith(':') or value_lower.endswith('?'):
+            return True
+        
+        # If value is suspiciously generic/empty
+        if value_lower in ['field', 'header', 'column', 'data', 'value', 'information']:
+            return True
+        
+        return False
+
     def _map_field_name(self, field_name: str) -> Optional[str]:
         """Map a field name to standard booking field"""
         field_lower = field_name.lower().strip()
@@ -619,46 +751,54 @@ class EnhancedMultiBookingProcessor(EnhancedFormProcessor):
             'passenger name': 'passenger_name',
             'guest name': 'passenger_name',
             'employee name': 'passenger_name',
+            'name': 'passenger_name',
             
             # Contact fields
             'contact number': 'passenger_phone',
             'mobile number': 'passenger_phone',
             'phone number': 'passenger_phone',
             'passenger phone': 'passenger_phone',
+            'contact': 'passenger_phone',
             
             # Location fields
             'city': 'from_location',
             'rental city / pick up city': 'from_location',
             'from location': 'from_location',
             'pickup city': 'from_location',
+            'location': 'from_location',
             
             # Date fields
             'date of travel': 'start_date',
             'date of requirement': 'start_date',
             'travel date': 'start_date',
             'journey date': 'start_date',
+            'date': 'start_date',
             
             # Time fields
             'pick-up time': 'reporting_time',
             'pickup time': 'reporting_time',
             'reporting time': 'reporting_time',
             'departure time': 'reporting_time',
+            'time': 'reporting_time',
             
             # Vehicle fields
             'cab type': 'vehicle_group',
             'car type': 'vehicle_group',
             'vehicle type': 'vehicle_group',
             'vehicle group': 'vehicle_group',
+            'type': 'vehicle_group',  # Generic type field
             
             # Address fields
             'pick-up address': 'reporting_address',
             'pickup address': 'reporting_address',
             'reporting address': 'reporting_address',
             'from address': 'reporting_address',
+            'pickup location': 'reporting_address',
             'drop at': 'drop_address',
             'drop address': 'drop_address',
             'destination': 'drop_address',
             'to address': 'drop_address',
+            'drop location': 'drop_address',
             
             # Flight/train fields
             'flight details': 'flight_train_number',
@@ -679,7 +819,8 @@ class EnhancedMultiBookingProcessor(EnhancedFormProcessor):
             'date & city / car': 'start_date',  # Will need special handling
             'usage (drop/disposal/outstation)': 'duty_type',
             'billing mode (btc)': 'bill_to',
-            'purpose of travel': 'remarks'
+            'purpose of travel': 'remarks',
+            'remarks': 'remarks'
         }
         
         # Check direct mappings first

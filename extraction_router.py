@@ -39,18 +39,18 @@ class ExtractionRouter:
             self.single_agent = None
         
         try:
-            # Use EnhancedMultiBookingProcessor for actual Textract-based multi-booking extraction
-            from enhanced_multi_booking_processor import EnhancedMultiBookingProcessor
-            self.multiple_agent = EnhancedMultiBookingProcessor(gemini_api_key=api_key)
-            logger.info("✅ Enhanced multi-booking processor initialized (Textract-based)")
+            # Use MultipleBookingExtractionAgent for text-based multiple booking extraction
+            self.multiple_agent = MultipleBookingExtractionAgent(api_key=api_key)
+            logger.info("✅ Multiple booking extraction agent initialized (AI-powered)")
         except Exception as e:
-            logger.error(f"❌ Failed to initialize enhanced multi-booking processor: {str(e)}")
-            # Fallback to original agent
+            logger.error(f"❌ Failed to initialize multiple booking extraction agent: {str(e)}")
+            # Fallback to enhanced processor if agent fails
             try:
-                self.multiple_agent = MultipleBookingExtractionAgent(api_key=api_key)
-                logger.info("✅ Multiple booking extraction agent initialized (fallback)")
+                from enhanced_multi_booking_processor import EnhancedMultiBookingProcessor
+                self.multiple_agent = EnhancedMultiBookingProcessor(gemini_api_key=api_key)
+                logger.info("✅ Enhanced multi-booking processor initialized (Textract fallback)")
             except Exception as e2:
-                logger.error(f"❌ Failed to initialize fallback agent: {str(e2)}")
+                logger.error(f"❌ Failed to initialize any multiple booking processor: {str(e2)}")
                 self.multiple_agent = None
         
         # Routing statistics
@@ -165,9 +165,14 @@ class ExtractionRouter:
         
         logger.debug("Routing to multiple booking extraction agent/processor")
         
-        # Check if this is the EnhancedMultiBookingProcessor (has process_document method)
-        if hasattr(self.multiple_agent, 'process_document'):
-            logger.info("Using EnhancedMultiBookingProcessor (Textract-based)")
+        # Prefer the standard extract method if available (MultipleBookingExtractionAgent)
+        if hasattr(self.multiple_agent, 'extract'):
+            logger.info("Using MultipleBookingExtractionAgent (AI-powered text extraction)")
+            return self.multiple_agent.extract(content, classification_result)
+        
+        # Fallback: Check if this is the EnhancedMultiBookingProcessor (has process_document method)
+        elif hasattr(self.multiple_agent, 'process_document'):
+            logger.info("Using EnhancedMultiBookingProcessor (Textract-based fallback)")
             
             # For processor, we need to simulate document processing
             # Convert text content to a mock file format
@@ -236,8 +241,12 @@ class ExtractionRouter:
                 else:
                     raise e
         else:
-            # Use the standard extract method
-            return self.multiple_agent.extract(content, classification_result)
+            # Unknown agent type - try extract method as last resort
+            logger.warning("Unknown multiple agent type - trying extract method")
+            if hasattr(self.multiple_agent, 'extract'):
+                return self.multiple_agent.extract(content, classification_result)
+            else:
+                raise ValueError(f"Multiple agent has no usable extraction method: {type(self.multiple_agent)}")
     
     def _create_textract_result(self, content: str, classification_result: ClassificationResult) -> ExtractionResult:
         """Create extraction result from pre-processed Textract content"""

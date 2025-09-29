@@ -6,6 +6,7 @@ Determines single vs multiple bookings based on specific business rules
 
 import os
 import json
+import re
 import time
 import logging
 from typing import Dict, List, Optional, Any, Tuple
@@ -430,9 +431,24 @@ CLASSIFY NOW:"""
             duty_type = DutyType.UNKNOWN
         
         # Enhanced classification logic with table detection
-        multiple_indicators = ['separate booking', 'different days', 'alternate', 'then', 'after that']
+        multiple_indicators = [
+            'separate booking', 'different days', 'alternate', 'then', 'after that',
+            'both are separate', 'different passengers', 'separate bookings'
+        ]
         
-        # Table/multi-booking structure indicators
+        # Clear multiple booking structure indicators
+        explicit_multiple_indicators = [
+            'first car', 'second car', 'third car', 'fourth car',
+            'car 1:', 'car 2:', 'car 3:', 'car 4:',
+            'first booking', 'second booking', 'third booking', 'fourth booking',
+            'arrange two', 'arrange 2', 'two separate', '2 separate',
+            'arrange three', 'arrange 3', 'three separate', '3 separate',
+            'arrange four', 'arrange 4', 'four separate', '4 separate',
+            'multiple cars', 'two cars', 'three cars', 'four cars',
+            '2 cars', '3 cars', '4 cars'
+        ]
+        
+        # Table/multi-booking structure indicators  
         table_indicators = [
             'cab 1', 'cab 2', 'cab 3', 'cab 4',
             'booking 1', 'booking 2', 'booking 3', 'booking 4',
@@ -441,13 +457,26 @@ CLASSIFY NOW:"""
             'enhanced multi-booking', 'textract'
         ]
         
-        # Check for table patterns
+        # Check for various multiple booking patterns
         has_table_indicators = any(indicator in content_lower for indicator in table_indicators)
         has_multiple_indicators = any(indicator in content_lower for indicator in multiple_indicators)
+        has_explicit_multiple_indicators = any(indicator in content_lower for indicator in explicit_multiple_indicators)
         
         # Count booking-related patterns
         booking_count = 1
-        if has_table_indicators:
+        
+        # Check for explicit multiple booking patterns first (most reliable)
+        if has_explicit_multiple_indicators:
+            if any(indicator in content_lower for indicator in ['fourth car', 'car 4:', 'fourth booking', 'arrange four', 'arrange 4', 'four separate', '4 separate', 'four cars', '4 cars']):
+                booking_count = 4
+            elif any(indicator in content_lower for indicator in ['third car', 'car 3:', 'third booking', 'arrange three', 'arrange 3', 'three separate', '3 separate', 'three cars', '3 cars']):
+                booking_count = 3
+            elif any(indicator in content_lower for indicator in ['second car', 'car 2:', 'second booking', 'arrange two', 'arrange 2', 'two separate', '2 separate', 'two cars', '2 cars']):
+                booking_count = 2
+            else:
+                # Default for explicit indicators
+                booking_count = 2
+        elif has_table_indicators:
             # Try to detect number of bookings from table patterns
             if 'cab 4' in content_lower or 'booking 4' in content_lower:
                 booking_count = 4
@@ -457,7 +486,6 @@ CLASSIFY NOW:"""
                 booking_count = 2
             
             # Look for explicit booking count mentions
-            import re
             count_matches = re.findall(r'(\d+)\s*bookings?\s*found', content_lower)
             if count_matches:
                 booking_count = max(int(count_matches[0]), booking_count)
@@ -465,11 +493,13 @@ CLASSIFY NOW:"""
             booking_count = 2
         
         # Classification decision
-        booking_type = BookingType.MULTIPLE if (has_table_indicators or has_multiple_indicators) else BookingType.SINGLE
+        booking_type = BookingType.MULTIPLE if (has_explicit_multiple_indicators or has_table_indicators or has_multiple_indicators) else BookingType.SINGLE
         
         # Update reasoning
         reasoning = "Rule-based classification (Gemma API unavailable)"
-        if has_table_indicators:
+        if has_explicit_multiple_indicators:
+            reasoning += " - Detected explicit multiple booking structure (first car, second car, etc.)"
+        elif has_table_indicators:
             reasoning += " - Detected table/multi-booking structure"
         elif has_multiple_indicators:
             reasoning += " - Detected multiple booking indicators"
