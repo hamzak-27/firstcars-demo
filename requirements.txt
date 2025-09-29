@@ -29,3 +29,6 @@ python-docx>=0.8.11
 
 # Additional utilities
 typing-extensions>=4.0.0
+python-dotenv>=1.0.0
+Pillow>=9.0.0
+pydantic>=1.10.0

@@ -283,7 +283,9 @@ def process_file_upload(orchestrator, uploaded_file, sender_email: str = None):
                     st.info(f"🔄 Processing image with Multi-Booking Table Processor...")
                     try:
                         from enhanced_multi_booking_processor import EnhancedMultiBookingProcessor
-                        multi_processor = EnhancedMultiBookingProcessor()
+                        # Initialize with Gemini API key from orchestrator
+                        api_key = getattr(orchestrator, 'api_key', None)
+                        multi_processor = EnhancedMultiBookingProcessor(gemini_api_key=api_key)
                         
                         # Process with the multi-booking table processor
                         # Save file temporarily for processing

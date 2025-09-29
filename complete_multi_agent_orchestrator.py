@@ -118,7 +118,7 @@ class CompleteMultiAgentOrchestrator:
                         self.booking_type = BookingType.MULTIPLE
                         self.booking_count = booking_count
                         self.confidence_score = 0.95
-                        self.detected_duty_type = DutyType.POINT_TO_POINT
+                        self.detected_duty_type = DutyType.DROP_4_40
                         self.cost_inr = 0.0
                         self.processing_time = 0.01
                 
@@ -128,7 +128,7 @@ class CompleteMultiAgentOrchestrator:
                     'booking_type': 'multiple',
                     'booking_count': booking_count,
                     'confidence': 0.95,
-                    'duty_type': 'point_to_point',
+                    'duty_type': 'drop_4_40',
                     'cost_inr': 0.0,
                     'processing_time': 0.01
                 }

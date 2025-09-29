@@ -366,9 +366,10 @@ class BusinessLogicValidationAgent:
         
         current_vehicle = str(df.iloc[row_idx]['Vehicle Group']).strip().lower()
         
-        if not current_vehicle or current_vehicle == 'nan':
-            # Default vehicle
+        if not current_vehicle or current_vehicle == 'nan' or current_vehicle == 'none' or current_vehicle == '':
+            # Default vehicle when no car type is mentioned
             df.iloc[row_idx, df.columns.get_loc('Vehicle Group')] = 'Swift Dzire'
+            logger.info(f"No vehicle specified, defaulted to Swift Dzire for row {row_idx}")
         else:
             # First check CSV mappings if available
             standardized = None
@@ -614,7 +615,86 @@ class BusinessLogicValidationAgent:
         return df
     
     def _extract_extra_information(self, df: pd.DataFrame, row_idx: int, original_content: str) -> str:
-        """Extract extra information not captured in structured fields"""
+        """Extract extra information using AI or fallback to rules"""
+        
+        if self.model:
+            try:
+                return self._extract_remarks_with_ai(original_content, df, row_idx)
+            except Exception as e:
+                logger.warning(f"AI remarks extraction failed: {e}, using fallback")
+                return self._extract_remarks_fallback(original_content, df, row_idx)
+        else:
+            return self._extract_remarks_fallback(original_content, df, row_idx)
+    
+    def _extract_remarks_with_ai(self, original_content: str, df: pd.DataFrame, row_idx: int) -> str:
+        """Extract remarks using AI with enhanced prompt"""
+        
+        # Get current booking data
+        current_booking = {
+            'passenger': str(df.iloc[row_idx]['Passenger Name']),
+            'phone': str(df.iloc[row_idx]['Passenger Phone Number']),
+            'from_location': str(df.iloc[row_idx]['From (Service Location)']),
+            'to_location': str(df.iloc[row_idx]['To']),
+            'vehicle': str(df.iloc[row_idx]['Vehicle Group']),
+            'date': str(df.iloc[row_idx]['Start Date']),
+            'time': str(df.iloc[row_idx]['Rep. Time']),
+            'flight': str(df.iloc[row_idx]['Flight/Train Number'])
+        }
+        
+        prompt = f"""You are a car rental booking validation agent. Extract ALL additional information from the original email/content that should go into the REMARKS column.
+
+IMPORTANT REQUIREMENTS:
+1. Include driver name and contact if mentioned in the mail
+2. Include ALL extra information provided by the booker that doesn't fit into the structured fields
+3. NO INFORMATION should be omitted that is present in the mail
+4. Include special instructions, preferences, additional context
+5. Include multiple flight details and numbers if provided
+6. Include any emergency contacts, special requirements, or notes
+
+CURRENT BOOKING DATA (already extracted):
+{current_booking}
+
+ORIGINAL EMAIL/CONTENT:
+{original_content}
+
+Extract ONLY the additional information that is NOT already captured in the structured booking fields above. Focus on:
+- Driver names and contact numbers
+- Special instructions or preferences  
+- Additional flight/train details
+- Emergency contacts
+- Special requirements (wheelchair, child seat, etc.)
+- Billing or payment instructions
+- Additional context or notes
+- Any other information not in structured fields
+
+Return only the remarks text (no JSON, no formatting). If no additional information, return empty string."""
+        
+        try:
+            response = self.model.generate_content(
+                prompt,
+                generation_config=genai.types.GenerationConfig(
+                    temperature=0.1,
+                    max_output_tokens=500,
+                    top_p=0.8
+                )
+            )
+            
+            if response and hasattr(response, 'text') and response.text:
+                remarks = response.text.strip()
+                
+                # Track cost
+                self._track_cost(prompt, remarks)
+                
+                return remarks
+            else:
+                return ""
+                
+        except Exception as e:
+            logger.error(f"AI remarks extraction failed: {e}")
+            return ""
+    
+    def _extract_remarks_fallback(self, original_content: str, df: pd.DataFrame, row_idx: int) -> str:
+        """Fallback rule-based remarks extraction"""
         
         extra_info = []
         content_lower = original_content.lower()
@@ -643,6 +723,11 @@ class BusinessLogicValidationAgent:
             if any(info in line_lower for info in structured_info.values() if info and info != 'nan'):
                 continue
                 
+            # Look for driver information
+            if 'driver' in line_lower and ('name' in line_lower or 'contact' in line_lower):
+                extra_info.append(f"Driver info: {line}")
+                continue
+                
             # Look for additional context, special instructions, etc.
             if any(keyword in line_lower for keyword in [
                 'urgent', 'priority', 'asap', 'immediate', 'emergency',
@@ -658,6 +743,21 @@ class BusinessLogicValidationAgent:
             return '; '.join(extra_info[:3])  # Limit to top 3 pieces of extra info
         
         return ""
+    
+    def _track_cost(self, input_text: str, output_text: str) -> float:
+        """Track API usage cost"""
+        input_tokens = len(input_text) // 4
+        output_tokens = len(output_text) // 4
+        
+        cost_inr = (
+            (input_tokens / 1000) * self.cost_per_1k_input_tokens +
+            (output_tokens / 1000) * self.cost_per_1k_output_tokens
+        )
+        
+        self.total_cost += cost_inr
+        self.request_count += 1
+        
+        return cost_inr
     
     def _validate_other_fields(self, df: pd.DataFrame, row_idx: int) -> pd.DataFrame:
         """Validate and clean other fields"""

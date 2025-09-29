@@ -1,9 +1,28 @@
-[theme]
-primaryColor = "#1f77b4"
-backgroundColor = "#ffffff"
-secondaryBackgroundColor = "#f0f2f6"
-textColor = "#262730"
-
 [server]
-headless = true
+# Enable Streamlit to run on all interfaces (required for cloud deployment)
+address = "0.0.0.0"
+port = 8501
+
+# Disable CORS for Streamlit Cloud compatibility
 enableCORS = false
+enableXsrfProtection = false
+
+# Increase upload size limits for document processing
+maxUploadSize = 200
+maxMessageSize = 200
+
+# Optimize for cloud deployment
+headless = true
+runOnSave = true
+
+[theme]
+# Set a professional theme
+primaryColor = "#FF6B35"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F0F2F6"
+textColor = "#262730"
+font = "sans serif"
+
+[browser]
+# Disable browser tab gathering for better performance
+gatherUsageStats = false
