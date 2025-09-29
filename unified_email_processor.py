@@ -28,10 +28,27 @@ class UnifiedEmailProcessor:
     
     def __init__(self, openai_api_key: str = None):
         """Initialize unified processor"""
-        # Always use fallback processor to avoid OpenAI dependency issues
-        self.structured_agent = FallbackEmailProcessor()
-        self.using_fallback = True
-        logger.info("Unified email processor initialized with fallback processor (OpenAI disabled)")
+        self.openai_api_key = openai_api_key
+        
+        # Try to use OpenAI if API key is provided and available
+        if openai_api_key and OPENAI_AVAILABLE:
+            try:
+                self.structured_agent = StructuredEmailAgent(api_key=openai_api_key)
+                self.using_fallback = False
+                logger.info("Unified email processor initialized with OpenAI agent")
+            except Exception as e:
+                logger.warning(f"Failed to initialize OpenAI agent: {str(e)}, using fallback")
+                self.structured_agent = FallbackEmailProcessor()
+                self.using_fallback = True
+                logger.info("Fallback email processor initialized")
+        else:
+            # Use fallback processor
+            self.structured_agent = FallbackEmailProcessor()
+            self.using_fallback = True
+            if not openai_api_key:
+                logger.info("Fallback email processor initialized (no API key provided)")
+            else:
+                logger.info("Fallback email processor initialized (OpenAI not available)")
     
     def process_email(self, email_content: str, sender_email: str = None) -> StructuredExtractionResult:
         """

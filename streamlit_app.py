@@ -396,23 +396,80 @@ def main():
         st.error(f"❌ Google Sheets connection failed: {sheets_message}")
         st.info("📝 Please ensure Google Service Account credentials are configured in Streamlit secrets.")
     
+    # API Key Configuration Section
+    st.subheader("🔑 API Key Configuration")
+    
     # Check for API key (from secrets or environment)
     api_key = None
     try:
         # Try Streamlit secrets first (for deployment)
         api_key = st.secrets["OPENAI_API_KEY"]
+        api_key_source = "Streamlit Secrets"
     except (KeyError, FileNotFoundError):
         # Fallback to environment variable (for local development)
         api_key = os.getenv('OPENAI_API_KEY')
+        api_key_source = "Environment Variable" if api_key else None
     
-    if not api_key:
-        st.error("❌ OpenAI API key not found. Please configure it in Streamlit secrets or .env file.")
-        st.info("📝 For local development: Add OPENAI_API_KEY to your .env file")
-        st.info("☁️ For deployment: Configure OPENAI_API_KEY in Streamlit Cloud secrets")
-        st.stop()
+    # Provide UI option to enter API key
+    col_key1, col_key2 = st.columns([2, 1])
     
-    # Set the API key in environment for the agent to use
-    os.environ['OPENAI_API_KEY'] = api_key
+    with col_key1:
+        if api_key:
+            st.success(f"✅ OpenAI API key found in {api_key_source}")
+            use_existing_key = st.checkbox("Use existing API key", value=True, key="use_existing_api_key")
+            if not use_existing_key:
+                api_key = st.text_input(
+                    "Enter OpenAI API key:",
+                    type="password",
+                    help="Enter your OpenAI API key for AI-powered extraction",
+                    key="manual_api_key"
+                )
+        else:
+            st.warning("⚠️ No OpenAI API key found in secrets or environment")
+            
+            # Offer options
+            key_option = st.radio(
+                "Choose your preferred option:",
+                [
+                    "Continue with basic extraction (no AI)",
+                    "Enter API key manually", 
+                    "Set up API key in environment"
+                ],
+                key="api_key_option"
+            )
+            
+            if key_option == "Enter API key manually":
+                api_key = st.text_input(
+                    "Enter OpenAI API key:",
+                    type="password",
+                    help="Enter your OpenAI API key for AI-powered extraction",
+                    key="manual_api_key"
+                )
+            elif key_option == "Set up API key in environment":
+                with st.expander("📝 How to set up API key", expanded=False):
+                    st.markdown("""
+                    **For local development:**
+                    1. Create a `.env` file in your project directory
+                    2. Add: `OPENAI_API_KEY=your_api_key_here`
+                    3. Restart the application
+                    
+                    **For Streamlit Cloud deployment:**
+                    1. Go to your app settings in Streamlit Cloud
+                    2. Add `OPENAI_API_KEY` in the secrets section
+                    3. Redeploy your application
+                    """)
+    
+    with col_key2:
+        if api_key:
+            st.info("🤖 AI-powered extraction enabled")
+        else:
+            st.info("📝 Basic extraction mode")
+    
+    # Set the API key in environment for the agents to use
+    if api_key:
+        os.environ['OPENAI_API_KEY'] = api_key
+    
+    st.markdown("---")
     
     # Initialize processors
     unified_processor = UnifiedEmailProcessor(api_key)
