@@ -28,15 +28,34 @@ class BusinessLogicValidationAgent:
     """
     Final validation agent that applies business rules and enhances DataFrame
     
-    Validates and enhances:
-    - Duty Type (with existing logic)
-    - Vehicle Group standardization
+    VALIDATION REQUIREMENTS:
+    
+    1. REMARKS COLUMN:
+       - All extra information provided by the booker which does not fit into 
+         the preexisting fields MUST be put into this field
+       - NO INFORMATION should be omitted that is present in the mail
+       - Include special instructions, preferences, additional context
+    
+    2. LABELS COLUMN (ONLY these 3 labels are used):
+       - LadyGuest: ONLY if "Ms" or "Mrs" is given in the passenger info
+       - MD's Guest: Ignore for now (not implemented)
+       - VIP: ONLY if the booker specifically mentions that passenger is VIP in mail
+    
+    3. DUTY TYPES:
+       - Verify working correctly (P2P/G2G classification)
+       - Validate package assignments (04HR 40KMS, 08HR 80KMS, Outstation XKM)
+    
+    4. ALL MAPPINGS:
+       - Vehicle Group mappings (verify standardization)
+       - City name mappings (verify consistency)
+       - Corporate pattern mappings (verify G2G/P2P classification)
+       - Dispatch center assignments (verify location-based assignment)
+    
+    Standard Validations:
     - Time calculations (15-minute buffers)
-    - Dispatch Center assignment
-    - Corporate/Customer field completion
-    - City name validation for From/To
-    - Labels assignment
-    - All other DataFrame fields
+    - Phone number formatting (10 digits)
+    - Required field defaults
+    - Date consistency (end date = start date if not specified)
     """
     
     def __init__(self, api_key: str = None, model_name: str = "models/gemini-2.5-flash"):
@@ -230,10 +249,14 @@ class BusinessLogicValidationAgent:
         # 6. Assign dispatch center
         df = self._assign_dispatch_center(df, row_idx)
         
-        # 7. Generate appropriate labels
+        # 7. Generate appropriate labels and handle VIP detection
         df = self._generate_labels(df, row_idx, classification_result)
+        df = self._check_vip_status(df, row_idx, original_content)
         
-        # 8. Validate and clean other fields
+        # 8. Enhance remarks with all extra information
+        df = self._enhance_remarks_with_extra_info(df, row_idx, original_content)
+        
+        # 9. Validate and clean other fields
         df = self._validate_other_fields(df, row_idx)
         
         return df
@@ -339,7 +362,7 @@ class BusinessLogicValidationAgent:
         return distance_map.get((from_clean, to_clean), 250)  # Default 250KMS
     
     def _standardize_vehicle_group(self, df: pd.DataFrame, row_idx: int) -> pd.DataFrame:
-        """Standardize vehicle group names"""
+        """Standardize vehicle group names using CSV mappings"""
         
         current_vehicle = str(df.iloc[row_idx]['Vehicle Group']).strip().lower()
         
@@ -347,19 +370,50 @@ class BusinessLogicValidationAgent:
             # Default vehicle
             df.iloc[row_idx, df.columns.get_loc('Vehicle Group')] = 'Swift Dzire'
         else:
-            # Map to standardized name
-            standardized = self.vehicle_mappings.get(current_vehicle, current_vehicle.title())
+            # First check CSV mappings if available
+            standardized = None
+            
+            # Try to load vehicle mappings from CSV
+            try:
+                import csv
+                from pathlib import Path
+                
+                csv_path = Path('vehicle_mapping.csv')
+                if csv_path.exists():
+                    with open(csv_path, 'r', encoding='utf-8') as f:
+                        reader = csv.DictReader(f)
+                        for row in reader:
+                            # Assume CSV has columns: input_vehicle, mapped_vehicle
+                            input_col = row.get('input_vehicle', '').lower()
+                            mapped_col = row.get('mapped_vehicle', '')
+                            
+                            if input_col == current_vehicle:
+                                standardized = mapped_col
+                                break
+                            
+                            # Also check partial matches
+                            if input_col in current_vehicle or current_vehicle in input_col:
+                                standardized = mapped_col
+                                break
+                                
+            except Exception as e:
+                logger.warning(f"Could not load vehicle mappings from CSV: {e}")
+            
+            # Fallback to hardcoded mappings if CSV not available or no match found
+            if not standardized:
+                standardized = self.vehicle_mappings.get(current_vehicle, current_vehicle.title())
+            
             df.iloc[row_idx, df.columns.get_loc('Vehicle Group')] = standardized
         
         return df
     
     def _enhance_time_fields(self, df: pd.DataFrame, row_idx: int) -> pd.DataFrame:
-        """Enhance time fields with 15-minute buffer calculations"""
+        """Enhance time fields with 15-minute rounding and buffer calculations"""
         
         reporting_time = str(df.iloc[row_idx]['Rep. Time']).strip()
         
         if reporting_time and reporting_time != 'nan':
-            # Parse time and add 15-minute buffer for actual pickup
+            # Parse time and round to 15-minute intervals
             try:
                 # Parse current time format (HH:MM)
                 if re.match(r'\d{1,2}:\d{2}', reporting_time):
@@ -367,18 +421,44 @@ class BusinessLogicValidationAgent:
                     hour = int(time_parts[0])
                     minute = int(time_parts[1])
                     
-                    # Create datetime for calculation
-                    base_time = datetime.strptime(f"{hour:02d}:{minute:02d}", "%H:%M")
+                    # Round to nearest 15-minute interval (0, 15, 30, 45)
+                    rounded_minute = self._round_to_15_minutes(minute)
+                    
+                    # Handle hour rollover if minute became 60
+                    if rounded_minute == 60:
+                        hour += 1
+                        rounded_minute = 0
+                    
+                    # Format the rounded time
+                    rounded_time = f"{hour:02d}:{rounded_minute:02d}"
+                    
+                    # Update the time in the dataframe
+                    df.iloc[row_idx, df.columns.get_loc('Rep. Time')] = rounded_time
+                    
+                    # Add note to remarks if time was rounded
+                    if reporting_time != rounded_time:
+                        current_remarks = str(df.iloc[row_idx]['Remarks'])
+                        if current_remarks == 'nan' or not current_remarks:
+                            current_remarks = ""
+                        
+                        rounding_note = f"Time rounded from {reporting_time} to {rounded_time} (15-min intervals)"
+                        
+                        if "rounded from" not in current_remarks:
+                            enhanced_remarks = f"{current_remarks}; {rounding_note}".strip('; ')
+                            df.iloc[row_idx, df.columns.get_loc('Remarks')] = enhanced_remarks
+                    
+                    # Create datetime for buffer calculation
+                    base_time = datetime.strptime(rounded_time, "%H:%M")
                     
                     # Add 15-minute buffer for pickup time
                     buffer_time = base_time + timedelta(minutes=15)
                     
-                    # Update reporting time with buffer note in remarks
+                    # Update remarks with buffer info
                     current_remarks = str(df.iloc[row_idx]['Remarks'])
                     if current_remarks == 'nan' or not current_remarks:
                         current_remarks = ""
                     
-                    buffer_note = f"Reporting: {reporting_time}, Pickup: {buffer_time.strftime('%H:%M')} (15min buffer)"
+                    buffer_note = f"Pickup: {buffer_time.strftime('%H:%M')} (15min buffer)"
                     
                     if "15min buffer" not in current_remarks:
                         enhanced_remarks = f"{current_remarks}; {buffer_note}".strip('; ')
@@ -388,6 +468,20 @@ class BusinessLogicValidationAgent:
                 logger.warning(f"Could not parse time: {reporting_time}")
         
         return df
+    
+    def _round_to_15_minutes(self, minute: int) -> int:
+        """Round minutes to nearest 15-minute interval (0, 15, 30, 45)"""
+        # Examples: 7:10 -> 7:00, 7:25 -> 7:15, 7:43 -> 7:30, 7:55 -> 8:00
+        if minute <= 7:  # 0-7 minutes -> 0
+            return 0
+        elif minute <= 22:  # 8-22 minutes -> 15
+            return 15
+        elif minute <= 37:  # 23-37 minutes -> 30
+            return 30
+        elif minute <= 52:  # 38-52 minutes -> 45
+            return 45
+        else:  # 53-59 minutes -> next hour (60)
+            return 60
     
     def _standardize_city_names(self, df: pd.DataFrame, row_idx: int) -> pd.DataFrame:
         """Standardize city names in From/To columns"""
@@ -461,40 +555,109 @@ class BusinessLogicValidationAgent:
         return df
     
     def _generate_labels(self, df: pd.DataFrame, row_idx: int, classification_result: ClassificationResult) -> pd.DataFrame:
-        """Generate appropriate labels for the booking"""
+        """Generate appropriate labels based on specific business rules"""
         
         labels = []
         
-        # Add classification-based labels
-        if classification_result.booking_type.value == 'multiple':
-            labels.append('MULTI-BOOKING')
+        # Get original content for analysis
+        passenger_name = str(df.iloc[row_idx]['Passenger Name']).strip().lower()
         
-        # Add duty type labels
-        duty_type = str(df.iloc[row_idx]['Duty Type'])
-        if '04HR 40KMS' in duty_type:
-            labels.append('DROP-SERVICE')
-        elif '08HR 80KMS' in duty_type:
-            labels.append('DISPOSAL-SERVICE')
-        elif 'Outstation' in duty_type:
-            labels.append('OUTSTATION-SERVICE')
+        # 1. LadyGuest - ONLY if Ms or Mrs is given in the passenger info
+        if any(title in passenger_name for title in ['ms.', 'mrs.', 'ms ', 'mrs ']):
+            labels.append('LadyGuest')
         
-        # Add vehicle type labels
-        vehicle = str(df.iloc[row_idx]['Vehicle Group'])
-        if 'Innova' in vehicle:
-            labels.append('SUV')
-        elif 'Dzire' in vehicle:
-            labels.append('SEDAN')
+        # 2. MD's Guest - Ignore for now (as requested)
+        # pass
         
-        # Add corporate labels
-        if 'G2G' in duty_type:
-            labels.append('CORPORATE')
-        else:
-            labels.append('INDIVIDUAL')
+        # 3. VIP - ONLY if booker specifically mentions VIP in the mail
+        # This needs to be checked against original content in the calling method
+        # Will be added in _validate_single_booking_row method
         
-        # Join labels
-        df.iloc[row_idx, df.columns.get_loc('Labels')] = ', '.join(labels)
+        # Set labels (only the 3 specific ones)
+        df.iloc[row_idx, df.columns.get_loc('Labels')] = ', '.join(labels) if labels else ''
         
         return df
+    
+    def _check_vip_status(self, df: pd.DataFrame, row_idx: int, original_content: str) -> pd.DataFrame:
+        """Check if passenger is VIP based on original content"""
+        
+        content_lower = original_content.lower()
+        current_labels = str(df.iloc[row_idx]['Labels'])
+        
+        # Check if VIP is specifically mentioned in the mail
+        if 'vip' in content_lower:
+            labels_list = [label.strip() for label in current_labels.split(',') if label.strip()]
+            if 'VIP' not in labels_list:
+                labels_list.append('VIP')
+            df.iloc[row_idx, df.columns.get_loc('Labels')] = ', '.join(labels_list)
+        
+        return df
+    
+    def _enhance_remarks_with_extra_info(self, df: pd.DataFrame, row_idx: int, original_content: str) -> pd.DataFrame:
+        """Enhance remarks with ALL extra information that doesn't fit in other fields"""
+        
+        current_remarks = str(df.iloc[row_idx]['Remarks'])
+        if current_remarks == 'nan' or not current_remarks:
+            current_remarks = ""
+        
+        # Extract all information from original content that's not captured in structured fields
+        extra_info = self._extract_extra_information(df, row_idx, original_content)
+        
+        if extra_info:
+            if current_remarks:
+                enhanced_remarks = f"{current_remarks}. {extra_info}".replace('..', '.')
+            else:
+                enhanced_remarks = extra_info
+            
+            df.iloc[row_idx, df.columns.get_loc('Remarks')] = enhanced_remarks
+        
+        return df
+    
+    def _extract_extra_information(self, df: pd.DataFrame, row_idx: int, original_content: str) -> str:
+        """Extract extra information not captured in structured fields"""
+        
+        extra_info = []
+        content_lower = original_content.lower()
+        
+        # Get current structured data to avoid duplication
+        structured_info = {
+            'passenger': str(df.iloc[row_idx]['Passenger Name']).lower(),
+            'phone': str(df.iloc[row_idx]['Passenger Phone Number']),
+            'from_loc': str(df.iloc[row_idx]['From (Service Location)']).lower(),
+            'to_loc': str(df.iloc[row_idx]['To']).lower(),
+            'vehicle': str(df.iloc[row_idx]['Vehicle Group']).lower(),
+            'date': str(df.iloc[row_idx]['Start Date']),
+            'time': str(df.iloc[row_idx]['Rep. Time'])
+        }
+        
+        # Extract additional context that's not in structured fields
+        lines = original_content.split('\n')
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+                
+            line_lower = line.lower()
+            
+            # Skip lines that are already captured in structured fields
+            if any(info in line_lower for info in structured_info.values() if info and info != 'nan'):
+                continue
+                
+            # Look for additional context, special instructions, etc.
+            if any(keyword in line_lower for keyword in [
+                'urgent', 'priority', 'asap', 'immediate', 'emergency',
+                'special', 'note', 'important', 'please', 'kindly',
+                'preference', 'request', 'requirement', 'instruction',
+                'contact', 'call', 'inform', 'confirm', 'coordinate'
+            ]):
+                if len(line) > 10 and line not in extra_info:  # Avoid very short lines
+                    extra_info.append(line)
+        
+        # Join and clean up
+        if extra_info:
+            return '; '.join(extra_info[:3])  # Limit to top 3 pieces of extra info
+        
+        return ""
     
     def _validate_other_fields(self, df: pd.DataFrame, row_idx: int) -> pd.DataFrame:
         """Validate and clean other fields"""

@@ -63,19 +63,26 @@ def main():
     print("📝 Try the built-in sample inputs to test the system!")
     print()
     
-    # Set the environment variables for the session
-    # Note: Set your GEMINI_API_KEY environment variable or configure in the app
-    if 'GEMINI_API_KEY' not in os.environ:
-        print("⚠️ GEMINI_API_KEY not found in environment variables")
-        print("You can set it in the app interface")
+    # Set the Gemini API key
+    gemini_api_key = "AIzaSyAId73p8fsv1U0z2_jQ0yOLdcVJsVsOmeg"
+    os.environ['GEMINI_API_KEY'] = gemini_api_key
+    os.environ['GOOGLE_AI_API_KEY'] = gemini_api_key  # Alternative env var name
+    print(f"✅ Gemini API key configured: {gemini_api_key[:20]}...{gemini_api_key[-4:]}")  # Show partial key for verification
     
-    # Set AWS environment variables for Textract (if available)
-    if 'AWS_DEFAULT_REGION' not in os.environ:
-        os.environ['AWS_DEFAULT_REGION'] = 'ap-south-1'
+    # Set AWS environment variables for Textract
+    aws_credentials = {
+        'AWS_DEFAULT_REGION': 'ap-south-1',
+        'AWS_ACCESS_KEY_ID': 'AKIAYLZZKLOTYIXDAARY',
+        'AWS_SECRET_ACCESS_KEY': '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',
+        'S3_BUCKET_NAME': 'aws-textract-bucket3'
+    }
     
-    if 'AWS_ACCESS_KEY_ID' not in os.environ or 'AWS_SECRET_ACCESS_KEY' not in os.environ:
-        print("⚠️ AWS credentials not found in environment variables")
-        print("Textract features will not be available without AWS credentials")
+    for key, value in aws_credentials.items():
+        os.environ[key] = value
+    
+    print(f"✅ AWS credentials configured for region: {aws_credentials['AWS_DEFAULT_REGION']}")
+    print(f"✅ S3 bucket configured: {aws_credentials['S3_BUCKET_NAME']}")
+    print(f"✅ AWS Access Key: {aws_credentials['AWS_ACCESS_KEY_ID'][:10]}...{aws_credentials['AWS_ACCESS_KEY_ID'][-4:]}")
     
     try:
         subprocess.run([sys.executable, "-m", "streamlit", "run", "car_rental_app.py"])

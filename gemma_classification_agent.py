@@ -159,6 +159,15 @@ CRITICAL BUSINESS RULES:
    
 3. **Vehicle type changes during multi-day**: Different vehicles for different days
    - Example: "Dzire for Day 1-2, Innova for Day 3-4" = MULTIPLE bookings (2 separate)
+   
+4. **TABLE EXTRACTION with multiple bookings**: Table data showing multiple booking entries/columns
+   - Example: "TABLE EXTRACTION RESULTS (4 bookings found)" = MULTIPLE bookings
+   - Example: "Cab 1, Cab 2, Cab 3, Cab 4" column headers = MULTIPLE bookings (4 separate)
+   - Example: Multiple rows with different passenger names/dates = MULTIPLE bookings
+   
+5. **STRUCTURED DATA with multiple records**: Multiple booking records extracted from forms/tables
+   - Look for patterns like "Booking 1:", "Booking 2:", "Booking 3:" etc.
+   - Multiple different dates, names, or addresses in structured format
 
 DUTY TYPE DETECTION:
 - **4HR/40KM (4/40)**: "drop", "pickup and drop", "airport transfer", "point to point"
@@ -238,6 +247,13 @@ CLASSIFY NOW:"""
                 )
             )
             
+            # Check if response is valid
+            if not response or not hasattr(response, 'text'):
+                raise ValueError("Invalid response from Gemini API")
+            
+            if not response.text or not response.text.strip():
+                raise ValueError("Empty response from Gemini API")
+            
             output_text = response.text.strip()
             processing_time = time.time() - start_time
             
@@ -262,7 +278,7 @@ CLASSIFY NOW:"""
             return self._rule_based_classification(content, start_time, error=str(e))
     
     def _parse_classification_response(self, response_text: str) -> Dict[str, Any]:
-        """Parse JSON response from Gemma"""
+        """Parse JSON response from Gemma with enhanced error handling"""
         try:
             # Clean response text
             response_text = response_text.strip()
@@ -277,12 +293,76 @@ CLASSIFY NOW:"""
                 raise ValueError("No JSON object found in response")
             
             json_str = response_text[start:end]
+            
+            # Try to fix common JSON issues
+            json_str = self._fix_common_json_issues(json_str)
+            
             return json.loads(json_str)
             
         except json.JSONDecodeError as e:
             logger.error(f"JSON parsing failed: {str(e)}")
             logger.error(f"Response was: {response_text[:500]}...")
-            raise ValueError(f"Invalid JSON in Gemma response: {str(e)}")
+            
+            # Try to extract key information from malformed JSON
+            return self._extract_fallback_classification(response_text)
+    
+    def _fix_common_json_issues(self, json_str: str) -> str:
+        """Fix common JSON formatting issues"""
+        # Remove trailing commas before closing braces/brackets
+        json_str = re.sub(r',\s*([}\]])', r'\1', json_str)
+        
+        # Fix unescaped quotes in string values
+        json_str = re.sub(r'"([^"]*?)"([^"]*?)"([^"]*?)":', r'"\1\'\2\'\3":', json_str)
+        
+        # Truncate if JSON is incomplete (common with large responses)
+        brace_count = json_str.count('{') - json_str.count('}')
+        if brace_count > 0:
+            # Try to find a complete JSON portion
+            lines = json_str.split('\n')
+            for i, line in enumerate(lines):
+                partial = '\n'.join(lines[:i+1])
+                try:
+                    json.loads(partial)
+                    json_str = partial
+                    break
+                except:
+                    continue
+        
+        return json_str
+    
+    def _extract_fallback_classification(self, response_text: str) -> Dict[str, Any]:
+        """Extract classification info from malformed JSON response"""
+        logger.warning("Using fallback classification extraction")
+        
+        # Extract key information using regex
+        booking_type = 'single'  # default
+        booking_count = 1
+        confidence = 0.8
+        
+        if 'multiple' in response_text.lower():
+            booking_type = 'multiple'
+            booking_count = 2
+        
+        # Try to extract confidence if present
+        conf_match = re.search(r'confidence["\s]*:["\s]*(\d+(?:\.\d+)?)', response_text, re.IGNORECASE)
+        if conf_match:
+            confidence = float(conf_match.group(1))
+            if confidence > 1:  # Convert percentage to decimal
+                confidence = confidence / 100
+        
+        return {
+            'booking_classification': {
+                'booking_type': booking_type,
+                'booking_count': booking_count,
+                'confidence_score': confidence
+            },
+            'pattern_analysis': {},
+            'detected_duty_type': 'unknown',
+            'detected_dates': [],
+            'detected_vehicles': [],
+            'detected_drops': [],
+            'reasoning': 'Extracted from malformed JSON response'
+        }
     
     def _create_result_object(self, data: Dict[str, Any], cost_inr: float, processing_time: float) -> ClassificationResult:
         """Create ClassificationResult from parsed data"""
@@ -349,13 +429,53 @@ CLASSIFY NOW:"""
         else:
             duty_type = DutyType.UNKNOWN
         
-        # Simple classification logic
+        # Enhanced classification logic with table detection
         multiple_indicators = ['separate booking', 'different days', 'alternate', 'then', 'after that']
+        
+        # Table/multi-booking structure indicators
+        table_indicators = [
+            'cab 1', 'cab 2', 'cab 3', 'cab 4',
+            'booking 1', 'booking 2', 'booking 3', 'booking 4',
+            'table extraction results', 'bookings found',
+            'multiple bookings', 'found 4 bookings', 'found 3 bookings',
+            'enhanced multi-booking', 'textract'
+        ]
+        
+        # Check for table patterns
+        has_table_indicators = any(indicator in content_lower for indicator in table_indicators)
         has_multiple_indicators = any(indicator in content_lower for indicator in multiple_indicators)
         
-        # Default classification
-        booking_type = BookingType.MULTIPLE if has_multiple_indicators else BookingType.SINGLE
-        booking_count = 2 if has_multiple_indicators else 1
+        # Count booking-related patterns
+        booking_count = 1
+        if has_table_indicators:
+            # Try to detect number of bookings from table patterns
+            if 'cab 4' in content_lower or 'booking 4' in content_lower:
+                booking_count = 4
+            elif 'cab 3' in content_lower or 'booking 3' in content_lower:
+                booking_count = 3
+            elif 'cab 2' in content_lower or 'booking 2' in content_lower:
+                booking_count = 2
+            
+            # Look for explicit booking count mentions
+            import re
+            count_matches = re.findall(r'(\d+)\s*bookings?\s*found', content_lower)
+            if count_matches:
+                booking_count = max(int(count_matches[0]), booking_count)
+        elif has_multiple_indicators:
+            booking_count = 2
+        
+        # Classification decision
+        booking_type = BookingType.MULTIPLE if (has_table_indicators or has_multiple_indicators) else BookingType.SINGLE
+        
+        # Update reasoning
+        reasoning = "Rule-based classification (Gemma API unavailable)"
+        if has_table_indicators:
+            reasoning += " - Detected table/multi-booking structure"
+        elif has_multiple_indicators:
+            reasoning += " - Detected multiple booking indicators"
+        
+        if error:
+            reasoning += f" - Error: {error}"
         
         reasoning = "Rule-based classification (Gemma API unavailable)"
         if error:

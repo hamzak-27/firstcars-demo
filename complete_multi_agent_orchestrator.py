@@ -105,28 +105,76 @@ class CompleteMultiAgentOrchestrator:
         }
         
         try:
-            # Stage 1: Classification
-            logger.info("📊 Stage 1: Classification (Determining booking type)")
+            # Check if content is already processed by EnhancedMultiBookingProcessor
+            if "TABLE EXTRACTION RESULTS" in content:
+                logger.info("🎯 Detected preprocessed multi-booking content - bypassing classification")
+                
+                # Create mock classification for preprocessed content
+                from gemma_classification_agent import BookingType, DutyType
+                booking_count = content.count("Booking ") if "Booking " in content else 1
+                
+                class MockClassification:
+                    def __init__(self):
+                        self.booking_type = BookingType.MULTIPLE
+                        self.booking_count = booking_count
+                        self.confidence_score = 0.95
+                        self.detected_duty_type = DutyType.POINT_TO_POINT
+                        self.cost_inr = 0.0
+                        self.processing_time = 0.01
+                
+                classification_result = MockClassification()
+                result['pipeline_stages']['classification'] = {
+                    'agent': 'PreprocessedBypass',
+                    'booking_type': 'multiple',
+                    'booking_count': booking_count,
+                    'confidence': 0.95,
+                    'duty_type': 'point_to_point',
+                    'cost_inr': 0.0,
+                    'processing_time': 0.01
+                }
+                
+            else:
+                # Stage 1: Classification
+                logger.info("📊 Stage 1: Classification (Determining booking type)")
+                
+                if not self.classification_agent:
+                    raise ValueError("Classification agent not available")
+                
+                classification_result = self.classification_agent.classify_content(content, source_type)
+                result['pipeline_stages']['classification'] = {
+                    'agent': 'GemmaClassificationAgent',
+                    'booking_type': classification_result.booking_type.value,
+                    'booking_count': classification_result.booking_count,
+                    'confidence': classification_result.confidence_score,
+                    'duty_type': classification_result.detected_duty_type.value,
+                    'cost_inr': classification_result.cost_inr,
+                    'processing_time': classification_result.processing_time
+                }
             
-            if not self.classification_agent:
-                raise ValueError("Classification agent not available")
+            # Handle both enum and mock classification results
+            if hasattr(classification_result.booking_type, 'value'):
+                booking_type_str = classification_result.booking_type.value
+            else:
+                # For mock classifications, convert to string
+                booking_type_str = str(classification_result.booking_type).replace('BookingType.', '').lower()
             
-            classification_result = self.classification_agent.classify_content(content, source_type)
-            result['pipeline_stages']['classification'] = {
-                'agent': 'GemmaClassificationAgent',
-                'booking_type': classification_result.booking_type.value,
-                'booking_count': classification_result.booking_count,
-                'confidence': classification_result.confidence_score,
-                'duty_type': classification_result.detected_duty_type.value,
-                'cost_inr': classification_result.cost_inr,
-                'processing_time': classification_result.processing_time
-            }
+            # Ensure we have valid keys for stats
+            if booking_type_str not in ['multiple', 'single']:
+                if 'MULTIPLE' in str(booking_type_str).upper():
+                    booking_type_str = 'multiple'
+                else:
+                    booking_type_str = 'single'
             
-            self.system_stats['classification_stats'][classification_result.booking_type.value] += 1
+            self.system_stats['classification_stats'][booking_type_str] += 1
             self.system_stats['agent_costs']['classification'] += classification_result.cost_inr
-            result['metadata']['agents_used'].append('GemmaClassificationAgent')
             
-            logger.info(f"✅ Classification: {classification_result.booking_type.value} "
+            # Add agent name based on classification type
+            if "TABLE EXTRACTION RESULTS" in content:
+                result['metadata']['agents_used'].append('PreprocessedBypass')
+            else:
+                result['metadata']['agents_used'].append('GemmaClassificationAgent')
+            
+            logger.info(f"✅ Classification: {booking_type_str} "
                        f"({classification_result.booking_count} bookings)")
             
             # Stage 2: Extraction

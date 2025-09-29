@@ -1,0 +1,135 @@
+{
+  "tables": [
+    {
+      "type": "regular_table",
+      "headers": [
+        "",
+        "Cab Booking Format",
+        "Cab 1",
+        "Cab 2",
+        "Cab 3",
+        "Cab 4"
+      ],
+      "rows": [
+        [
+          "",
+          "Cab Booking Format",
+          "Cab 1",
+          "Cab 2",
+          "Cab 3",
+          "Cab 4"
+        ],
+        [
+          "",
+          "Name of Employee",
+          "Jayasheel Bhansali",
+          "Jayasheel Bhansali",
+          "Jayasheel Bhansali",
+          "Jayasheel Bhansali"
+        ],
+        [
+          "",
+          "Contact Number",
+          "7001682596",
+          "7001682596",
+          "7001682596",
+          "7001682596"
+        ],
+        [
+          "",
+          "City",
+          "Bangalore",
+          "Bangalore",
+          "Mumbai",
+          "Mumbai"
+        ],
+        [
+          "",
+          "Date of Travel",
+          "19-Sep-25",
+          "20 Sep 2025 & 21 Sep 2025",
+          "21-Sep-25",
+          "22 Sep 2025 to 25 Sep 2025"
+        ],
+        [
+          "",
+          "Pick-up Time",
+          "8:30 PM",
+          "10:00 AM",
+          "7:30 PM",
+          "8:00 AM"
+        ],
+        [
+          "",
+          "Cab Type",
+          "CRYSTA",
+          "CRYSTA",
+          "CRYSTA",
+          "CRYSTA"
+        ],
+        [
+          "",
+          "Pick-up Address",
+          "Bangalore Airport T-2",
+          "ITC Windsor Bangalore",
+          "Mumbai Airport Terminal 2",
+          "JW Marriott Mumbai Sahar"
+        ],
+        [
+          "",
+          "Drop at",
+          "ITC Windsor Bangalore",
+          "Full Day",
+          "JW Marriott Mumbai Sahar",
+          "Office ..Silver Utopia,Cardinal gracious Road, chakala andheri east FULL DAY"
+        ],
+        [
+          "",
+          "Flight details",
+          "AI-2641",
+          "NA",
+          "AI 2854",
+          "NA"
+        ],
+        [
+          "",
+          "Company Name",
+          "LTPL (Lendingkart Technologies Private Limited)",
+          "LTPL (Lendingkart Technologies Private Limited)",
+          "LTPL (Lendingkart Technologies Private Limited)",
+          "LTPL (Lendingkart Technologies Private Limited)"
+        ]
+      ],
+      "row_count": 11,
+      "column_count": 6
+    }
+  ],
+  "key_value_pairs": [
+    {
+      "key": "Cab 4",
+      "value": "Jayasheel Bhansali 7001682596",
+      "confidence": 80.0
+    },
+    {
+      "key": "Drop at",
+      "value": "ITC Windsor Bangalore",
+      "confidence": 30.31008529663086
+    },
+    {
+      "key": "Cab",
+      "value": "2",
+      "confidence": 44.28334045410156
+    },
+    {
+      "key": "Mumbai",
+      "value": "21-Sep-25",
+      "confidence": 57.45145797729492
+    },
+    {
+      "key": "Mumbai",
+      "value": "22 Sep 2025 to 25 Sep 2025",
+      "confidence": 50.78120803833008
+    }
+  ],
+  "raw_text": "Cab Booking Format\nCab 1\nCab 2\nCab 3\nCab 4\nName of Employee\nJayasheel Bhansali\nJayasheel Bhansali\nJayasheel Bhansali\nJayasheel Bhansali\nContact Number\n7001682596\n7001682596\n7001682596\n7001682596\nCity\nBangalore\nBangalore\nMumbai\nMumbai\nDate of Travel\n19-Sep-25\n20 Sep 2025 & 21 Sep 2025\n21-Sep-25\n22 Sep 2025 to 25 Sep 2025\nPick-up Time\n8:30 PM\n10:00 AM\n7:30 PM\n8:00 AM\nCab Type\nCRYSTA\nCRYSTA\nCRYSTA\nCRYSTA\nPick-up Address\nBangalore Airport T-2\nITC Windsor Bangalore\nMumbai Airport\nJW Marriott Mumbai Sahar\nTerminal 2\nOffice ..Silver Utopia,Cardinal\nDrop at\nITC Windsor Bangalore\nFull Day\nJW Marriott Mumbai Sahar\ngracious Road, chakala andheri\neast\nFULL DAY\nFlight details\nAI-2641\nNA\nAI 2854\nNA\nCompany Name\nLTPL (Lendingkart Technologies\nLTPL (Lendingkart Technologies Private\nLTPL (Lendingkart\nLTPL (Lendingkart Technologies\nPrivate Limited)\nLimited)\nTechnologies Private Limited)\nPrivate Limited)"
+}

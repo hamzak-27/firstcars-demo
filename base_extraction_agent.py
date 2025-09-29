@@ -314,6 +314,10 @@ class BaseExtractionAgent(ABC):
         end_date = self._normalize_date(booking_dict.get('end_date', ''))
         reporting_time = self._normalize_time(booking_dict.get('reporting_time', ''))
         
+        # Normalize and validate addresses
+        reporting_address = self._normalize_address(booking_dict.get('reporting_address', ''))
+        drop_address = self._normalize_address(booking_dict.get('drop_address', ''))
+        
         return BookingData(
             customer=booking_dict.get('customer', ''),
             booked_by_name=booking_dict.get('booked_by_name', ''),
@@ -329,8 +333,8 @@ class BaseExtractionAgent(ABC):
             start_date=start_date,
             end_date=end_date,
             reporting_time=reporting_time,
-            reporting_address=booking_dict.get('reporting_address', ''),
-            drop_address=booking_dict.get('drop_address', ''),
+            reporting_address=reporting_address,
+            drop_address=drop_address,
             flight_train_number=booking_dict.get('flight_train_number', ''),
             dispatch_center=booking_dict.get('dispatch_center', ''),
             remarks=booking_dict.get('remarks', ''),
@@ -338,6 +342,36 @@ class BaseExtractionAgent(ABC):
             confidence_score=booking_dict.get('confidence_score', 0.8),
             extraction_method=booking_dict.get('extraction_method', 'gemma_extraction')
         )
+    
+    def _normalize_address(self, address: str) -> str:
+        """Normalize and validate address format"""
+        if not address or not isinstance(address, str):
+            return ""
+        
+        address = address.strip()
+        if not address:
+            return ""
+        
+        # Remove excessive whitespace and normalize line breaks
+        address = re.sub(r'\s+', ' ', address)
+        address = re.sub(r'[\r\n]+', ', ', address)
+        
+        # Remove duplicate commas and clean up
+        address = re.sub(r',\s*,+', ',', address)
+        address = re.sub(r'^,\s*|\s*,$', '', address)
+        
+        # Capitalize first letter of each word for consistency
+        words = address.split()
+        normalized_words = []
+        for word in words:
+            if word.lower() in ['and', 'or', 'of', 'at', 'to', 'from', 'in', 'on', 'the']:
+                normalized_words.append(word.lower())
+            elif word.endswith(','):
+                normalized_words.append(word[:-1].title() + ',')
+            else:
+                normalized_words.append(word.title())
+        
+        return ' '.join(normalized_words)
     
     @abstractmethod
     def extract(self, content: str, classification_result: Any) -> ExtractionResult:
