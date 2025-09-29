@@ -142,10 +142,20 @@ def setup_api_key():
 def initialize_orchestrator(api_key: str):
     """Initialize the multi-agent orchestrator"""
     try:
+        if api_key and api_key != "test-key":
+            st.info(f"🤖 Initializing AI agents with Gemini API: {api_key[:20]}...{api_key[-4:]}")
+        else:
+            st.warning("⚠️ Initializing in test mode - limited functionality")
+            
         orchestrator = CompleteMultiAgentOrchestrator(
             api_key=api_key
         )
         st.session_state.orchestrator = orchestrator
+        
+        # Test the API connection
+        if api_key and api_key != "test-key":
+            st.success("✅ AI agents initialized successfully with Gemini API!")
+        
         return orchestrator
     except Exception as e:
         st.error(f"Failed to initialize orchestrator: {e}")
@@ -191,15 +201,23 @@ def display_system_status(orchestrator):
 def process_text_input(orchestrator, content: str, sender_email: str = None):
     """Process text input through the multi-agent system"""
     
+    st.info("🚀 Starting multi-agent AI processing pipeline...")
     with st.spinner("🔄 Processing with AI agents..."):
         start_time = time.time()
         
         try:
             # Process through orchestrator
+            st.info("🤖 Running through Classification → Extraction → Validation pipeline")
             result = orchestrator.process_content(
                 content=content,
                 source_type="text_input"
             )
+            
+            # Show processing success
+            if result.get('success'):
+                st.success(f"✅ AI processing completed! Found {result.get('booking_count', 0)} booking(s)")
+            else:
+                st.error(f"❌ AI processing failed: {result.get('error_message', 'Unknown error')}")
             
             processing_time = time.time() - start_time
             
@@ -262,14 +280,59 @@ def process_file_upload(orchestrator, uploaded_file, sender_email: str = None):
                         processing_method = "no_document_processor"
                 elif file_type in ['jpg', 'jpeg', 'png', 'gif']:
                     # Use EnhancedMultiBookingProcessor for table images (handles your exact formats)
+                    st.info(f"🔄 Processing image with Multi-Booking Table Processor...")
                     try:
                         from enhanced_multi_booking_processor import EnhancedMultiBookingProcessor
                         multi_processor = EnhancedMultiBookingProcessor()
                         
                         # Process with the multi-booking table processor
-                        table_result = multi_processor.process_multi_booking_document(file_content, uploaded_file.name, file_type)
+                        # Save file temporarily for processing
+                        import tempfile
+                        import os
+                        
+                        with tempfile.NamedTemporaryFile(delete=False, suffix=f'.{file_type}') as tmp_file:
+                            tmp_file.write(file_content)
+                            temp_path = tmp_file.name
+                        
+                        try:
+                            # Process the image using the correct method
+                            bookings = multi_processor.process_document(temp_path)
+                            
+                            # Create result object similar to what orchestrator expects
+                            class TableResult:
+                                def __init__(self, bookings, method):
+                                    self.bookings = []
+                                    self.extraction_method = method
+                                    self.processing_notes = f"Processed {len(bookings)} bookings"
+                                    
+                                    # Convert dict bookings to booking objects
+                                    for booking_dict in bookings:
+                                        booking_obj = type('Booking', (), booking_dict)
+                                        # Map common fields
+                                        booking_obj.passenger_name = booking_dict.get('Passenger Name', '')
+                                        booking_obj.passenger_phone = booking_dict.get('Phone', '')
+                                        booking_obj.corporate = booking_dict.get('Corporate', '')
+                                        booking_obj.start_date = booking_dict.get('Date', '')
+                                        booking_obj.reporting_time = booking_dict.get('Time', '')
+                                        booking_obj.vehicle_group = booking_dict.get('Vehicle', '')
+                                        booking_obj.from_location = booking_dict.get('From', '')
+                                        booking_obj.to_location = booking_dict.get('To', '')
+                                        booking_obj.reporting_address = booking_dict.get('Pickup', '')
+                                        booking_obj.drop_address = booking_dict.get('Drop', '')
+                                        booking_obj.flight_train_number = booking_dict.get('Flight', '')
+                                        booking_obj.remarks = booking_dict.get('Remarks', '')
+                                        self.bookings.append(booking_obj)
+                            
+                            table_result = TableResult(bookings, "Enhanced Multi-Booking Textract")
+                        finally:
+                            # Clean up temporary file
+                            if os.path.exists(temp_path):
+                                os.unlink(temp_path)
+                        
+                        st.success(f"✅ Table processing completed: {table_result.extraction_method}")
                         
                         if table_result.bookings:
+                            st.info(f"📊 Found {len(table_result.bookings)} booking(s) in table - Using AI for further processing")
                             # Convert the structured bookings back to text for the multi-agent pipeline
                             booking_summaries = []
                             for i, booking in enumerate(table_result.bookings, 1):
@@ -290,15 +353,20 @@ def process_file_upload(orchestrator, uploaded_file, sender_email: str = None):
                             content += f"\n\nOriginal processing method: {table_result.extraction_method}"
                             processing_method = "enhanced_multi_booking_textract"
                         else:
+                            st.warning(f"⚠️ No bookings found in table - This might be a single booking form")
                             content = f"Table processed but no bookings found: {uploaded_file.name}\nProcessing notes: {table_result.processing_notes or 'None'}"
                             processing_method = "table_no_bookings"
                     except ImportError:
                         # Fallback to enhanced form processor
+                        st.info(f"🔄 Falling back to Enhanced Form Processor for single booking...")
                         try:
                             from enhanced_form_processor import EnhancedFormProcessor
                             form_processor = EnhancedFormProcessor()
                             form_result = form_processor.process_document(file_content, uploaded_file.name, file_type)
+                            
+                            st.success(f"✅ Form processing completed: {form_result.extraction_method}")
                             if form_result.bookings and form_result.bookings[0].additional_info:
+                                st.info(f"📝 Found single booking - Using AI for further processing")
                                 content = form_result.bookings[0].additional_info
                                 processing_method = "enhanced_form_textract"
                             else:
@@ -530,12 +598,23 @@ Company Name: TechCorp India
                 st.session_state.sample_text = sample_table
 
 def main():
-    """Main application function"""
+    """Main application"""
+    
+    # Set AWS credentials first
+    aws_credentials = {
+        'AWS_DEFAULT_REGION': 'ap-south-1',
+        'AWS_ACCESS_KEY_ID': 'AKIAYLZZKLOTYIXDAARY', 
+        'AWS_SECRET_ACCESS_KEY': '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',
+        'S3_BUCKET_NAME': 'aws-textract-bucket3'
+    }
+    
+    for key, value in aws_credentials.items():
+        os.environ[key] = value
     
     # Initialize session state
     initialize_session_state()
     
-    # Display header
+    # Display main header
     display_main_header()
     
     # Setup API key
@@ -641,6 +720,23 @@ def main():
     # File upload method
     else:
         st.markdown("### 📎 File Upload")
+        
+        st.info("🔄 **File Processing Pipeline:** OCR Extraction → AI Classification → AI Extraction → AI Validation")
+        
+        with st.expander("📝 What happens to different file types", expanded=False):
+            st.markdown("""
+            **📊 Table Images (JPG/PNG):**
+            1. 🔄 Multi-Booking Table Processor (for complex tables)
+            2. 🔄 Enhanced Form Processor (fallback for single bookings) 
+            3. 🤖 Gemini AI processes extracted text through full pipeline
+            
+            **📄 Documents (PDF/DOCX):**
+            1. 🔄 Document processors with AWS Textract OCR
+            2. 🤖 Gemini AI processes extracted text through full pipeline
+            
+            **📝 Text Files (TXT):**
+            1. 🤖 Direct Gemini AI processing through full pipeline
+            """)
         
         uploaded_file = st.file_uploader(
             "Choose a file",

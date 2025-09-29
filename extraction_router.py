@@ -39,11 +39,19 @@ class ExtractionRouter:
             self.single_agent = None
         
         try:
-            self.multiple_agent = MultipleBookingExtractionAgent(api_key=api_key)
-            logger.info("✅ Multiple booking extraction agent initialized")
+            # Use EnhancedMultiBookingProcessor for actual Textract-based multi-booking extraction
+            from enhanced_multi_booking_processor import EnhancedMultiBookingProcessor
+            self.multiple_agent = EnhancedMultiBookingProcessor(gemini_api_key=api_key)
+            logger.info("✅ Enhanced multi-booking processor initialized (Textract-based)")
         except Exception as e:
-            logger.error(f"❌ Failed to initialize multiple booking agent: {str(e)}")
-            self.multiple_agent = None
+            logger.error(f"❌ Failed to initialize enhanced multi-booking processor: {str(e)}")
+            # Fallback to original agent
+            try:
+                self.multiple_agent = MultipleBookingExtractionAgent(api_key=api_key)
+                logger.info("✅ Multiple booking extraction agent initialized (fallback)")
+            except Exception as e2:
+                logger.error(f"❌ Failed to initialize fallback agent: {str(e2)}")
+                self.multiple_agent = None
         
         # Routing statistics
         self.routing_stats = {
@@ -76,6 +84,11 @@ class ExtractionRouter:
         
         logger.info(f"Routing extraction request: {classification_result.booking_type.value} "
                    f"({classification_result.booking_count} bookings)")
+        
+        # Check if content is already processed by Textract (from file upload)
+        if "TABLE EXTRACTION RESULTS" in content and "enhanced_multi_booking" in content:
+            logger.info("Content already processed by EnhancedMultiBookingProcessor - creating direct result")
+            return self._create_textract_result(content, classification_result)
         
         try:
             # Route based on booking type
@@ -145,13 +158,170 @@ class ExtractionRouter:
         return self.single_agent.extract(content, classification_result)
     
     def _route_to_multiple_agent(self, content: str, classification_result: ClassificationResult) -> ExtractionResult:
-        """Route to multiple booking extraction agent"""
+        """Route to multiple booking extraction agent or processor"""
         
         if not self.multiple_agent:
             raise ValueError("Multiple booking extraction agent not available")
         
-        logger.debug("Routing to multiple booking extraction agent")
-        return self.multiple_agent.extract(content, classification_result)
+        logger.debug("Routing to multiple booking extraction agent/processor")
+        
+        # Check if this is the EnhancedMultiBookingProcessor (has process_document method)
+        if hasattr(self.multiple_agent, 'process_document'):
+            logger.info("Using EnhancedMultiBookingProcessor (Textract-based)")
+            
+            # For processor, we need to simulate document processing
+            # Convert text content to a mock file format
+            try:
+                import tempfile
+                import io
+                
+                # Create a temporary text file with the content
+                content_bytes = content.encode('utf-8')
+                result = self.multiple_agent.process_document(content_bytes, "text_content.txt")
+                
+                # Convert StructuredExtractionResult to ExtractionResult
+                from base_extraction_agent import ExtractionResult
+                
+                # Create DataFrame from bookings
+                booking_records = []
+                for booking in result.bookings:
+                    record = {
+                        'Customer': booking.corporate or 'Corporate Client',
+                        'Booked By Name': booking.booked_by_name or 'Travel Coordinator', 
+                        'Booked By Phone Number': booking.booked_by_phone or '',
+                        'Booked By Email': booking.booked_by_email or '',
+                        'Passenger Name': booking.passenger_name or 'Guest',
+                        'Passenger Phone Number': booking.passenger_phone or '',
+                        'Passenger Email': booking.passenger_email or '',
+                        'From (Service Location)': booking.from_location or '',
+                        'To': booking.to_location or '',
+                        'Vehicle Group': booking.vehicle_group or '',
+                        'Duty Type': booking.duty_type or 'P2P',
+                        'Start Date': booking.start_date or '',
+                        'End Date': booking.end_date or '',
+                        'Rep. Time': booking.reporting_time or '',
+                        'Reporting Address': booking.reporting_address or '',
+                        'Drop Address': booking.drop_address or '',
+                        'Flight/Train Number': booking.flight_train_number or '',
+                        'Dispatch center': booking.dispatch_center or 'Central Dispatch',
+                        'Remarks': booking.remarks or f'Extracted by {result.extraction_method}',
+                        'Labels': booking.labels or ''
+                    }
+                    booking_records.append(record)
+                
+                import pandas as pd
+                df = pd.DataFrame(booking_records) if booking_records else pd.DataFrame()
+                
+                return ExtractionResult(
+                    success=True,
+                    bookings_dataframe=df,
+                    booking_count=len(result.bookings),
+                    confidence_score=result.confidence_score,
+                    processing_time=0.1,  # Approximate processing time
+                    cost_inr=0.0,  # Textract cost not tracked in this interface
+                    extraction_method=result.extraction_method,
+                    error_message=None,
+                    metadata={
+                        'processor_used': 'EnhancedMultiBookingProcessor',
+                        'textract_based': True,
+                        'original_processing_notes': result.processing_notes
+                    }
+                )
+                
+            except Exception as e:
+                logger.error(f"EnhancedMultiBookingProcessor failed: {e}")
+                # Fall back to extract method if available
+                if hasattr(self.multiple_agent, 'extract'):
+                    return self.multiple_agent.extract(content, classification_result)
+                else:
+                    raise e
+        else:
+            # Use the standard extract method
+            return self.multiple_agent.extract(content, classification_result)
+    
+    def _create_textract_result(self, content: str, classification_result: ClassificationResult) -> ExtractionResult:
+        """Create extraction result from pre-processed Textract content"""
+        
+        logger.info("Creating result from pre-processed Textract multi-booking content")
+        
+        # Parse the TABLE EXTRACTION RESULTS format
+        booking_records = []
+        
+        # Extract booking information from the formatted text
+        import re
+        
+        # Find all booking sections
+        booking_pattern = r'Booking (\d+):\s*([\s\S]*?)(?=\nBooking \d+:|\n\nOriginal processing method:|$)'
+        matches = re.findall(booking_pattern, content)
+        
+        for booking_num, booking_content in matches:
+            record = {
+                'Customer': 'Corporate Client',
+                'Booked By Name': 'Travel Coordinator',
+                'Booked By Phone Number': '',
+                'Booked By Email': '',
+                'Passenger Name': '',
+                'Passenger Phone Number': '',
+                'Passenger Email': '',
+                'From (Service Location)': '',
+                'To': '',
+                'Vehicle Group': '',
+                'Duty Type': 'P2P',
+                'Start Date': '',
+                'End Date': '',
+                'Rep. Time': '',
+                'Reporting Address': '',
+                'Drop Address': '',
+                'Flight/Train Number': '',
+                'Dispatch center': 'Central Dispatch',
+                'Remarks': f'Extracted from TABLE EXTRACTION RESULTS - Booking {booking_num}',
+                'Labels': ''
+            }
+            
+            # Parse individual fields from booking content
+            field_patterns = {
+                'Passenger Name': r'- Passenger: ([^\n(]+)',
+                'Passenger Phone Number': r'\(([\d\s]+)\)',
+                'Customer': r'- Company: ([^\n]+)',
+                'Start Date': r'- Date: ([^\n]+)',
+                'Rep. Time': r'- Time: ([^\n]+)',
+                'Vehicle Group': r'- Vehicle: ([^\n]+)',
+                'Reporting Address': r'- From: ([^\n]+)',
+                'Drop Address': r'- To: ([^\n]+)',
+                'Flight/Train Number': r'- Flight: ([^\n]+)'
+            }
+            
+            for field, pattern in field_patterns.items():
+                match = re.search(pattern, booking_content)
+                if match:
+                    value = match.group(1).strip()
+                    if value and value != 'N/A':
+                        record[field] = value
+            
+            booking_records.append(record)
+        
+        # Create DataFrame
+        import pandas as pd
+        df = pd.DataFrame(booking_records) if booking_records else pd.DataFrame()
+        
+        logger.info(f"Created {len(booking_records)} booking records from Textract content")
+        
+        return ExtractionResult(
+            success=True,
+            bookings_dataframe=df,
+            booking_count=len(booking_records),
+            confidence_score=0.95,  # High confidence since it's from Textract
+            processing_time=0.05,  # Very fast since it's just parsing
+            cost_inr=0.0,  # No additional cost
+            extraction_method="textract_preprocessed",
+            error_message=None,
+            metadata={
+                'processor_used': 'EnhancedMultiBookingProcessor',
+                'textract_based': True,
+                'preprocessing_detected': True,
+                'original_booking_count': classification_result.booking_count
+            }
+        )
     
     def _fallback_extraction(self, content: str, classification_result: ClassificationResult) -> ExtractionResult:
         """Fallback extraction when routing fails"""

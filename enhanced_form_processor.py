@@ -24,7 +24,7 @@ class EnhancedFormProcessor:
         
         Args:
             aws_region: AWS region for Textract
-            openai_api_key: OpenAI API key for AI processing
+            openai_api_key: OpenAI API key for AI processing (deprecated, uses Gemini)
         """
         # Auto-detect AWS region if not specified
         if aws_region is None:
@@ -32,9 +32,10 @@ class EnhancedFormProcessor:
             aws_region = session.region_name or 'us-east-1'
         
         self.aws_region = aws_region
-        self.openai_api_key = openai_api_key or os.getenv('OPENAI_API_KEY')
-        # Initialize email processor with None if no OpenAI key
-        self.email_processor = UnifiedEmailProcessor(openai_api_key)
+        # Get Gemini API key from environment (the system uses Gemini, not OpenAI)
+        gemini_api_key = os.getenv('GEMINI_API_KEY') or os.getenv('GOOGLE_AI_API_KEY')
+        # Initialize email processor with Gemini API key (will use fallback processor)
+        self.email_processor = UnifiedEmailProcessor(gemini_api_key)
         
         # Initialize AWS Textract client
         try:
@@ -268,7 +269,12 @@ class EnhancedFormProcessor:
                 return None
             
             # Check if this is a form-like table (2 columns: key-value pairs)
-            if max_col == 1:  # 2-column table (indices 0 and 1)
+            # But also check if it might be a multi-booking table that was mis-detected
+            row_count = len(table_rows)
+            
+            # If we have many rows (>8) in a 2-column table, it might be a multi-booking table
+            # that Textract mis-parsed. Force it to be treated as a regular table.
+            if max_col == 1 and row_count <= 8:  # 2-column table (indices 0 and 1) with few rows
                 key_value_pairs = []
                 for row_idx in sorted(table_rows.keys()):
                     row = table_rows[row_idx]
@@ -288,6 +294,55 @@ class EnhancedFormProcessor:
                     'row_count': len(table_rows),
                     'column_count': max_col + 1
                 }
+            elif max_col == 1 and row_count > 8:
+                # This might be a multi-booking table that was mis-detected by Textract
+                # Try to restructure it as a regular table
+                logger.warning(f"Detected potential multi-booking table with {row_count} rows, treating as regular table")
+                
+                rows = []
+                headers = None
+                
+                # Look for field names that suggest multi-booking structure
+                booking_indicators = ['cab', 'booking', 'employee', 'passenger', 'name', 'contact', 'city', 'date', 'time', 'address']
+                
+                # Check if we have typical multi-booking field names
+                has_booking_fields = False
+                for row_idx in sorted(table_rows.keys()):
+                    row = table_rows[row_idx]
+                    key = row.get(0, '').lower().strip()
+                    if any(indicator in key for indicator in booking_indicators):
+                        has_booking_fields = True
+                        break
+                
+                if has_booking_fields:
+                    # Force conversion to regular table format
+                    # This is a workaround for Textract mis-detection
+                    for row_idx in sorted(table_rows.keys()):
+                        row = table_rows[row_idx]
+                        # Convert key-value pair to regular row format
+                        row_data = [row.get(0, ''), row.get(1, '')]
+                        
+                        if row_idx == 0:  # First row might be headers
+                            headers = row_data if row_data[0] and row_data[1] else None
+                        
+                        rows.append(row_data)
+                    
+                    return {
+                        'type': 'regular_table',
+                        'headers': headers,
+                        'rows': rows,
+                        'row_count': len(rows),
+                        'column_count': 2,
+                        'textract_correction': 'forced_multi_booking_detection'
+                    }
+                else:
+                    # Still treat as form table
+                    return {
+                        'type': 'form_table',
+                        'key_value_pairs': key_value_pairs,
+                        'row_count': len(table_rows),
+                        'column_count': max_col + 1
+                    }
             else:
                 # Regular table with potential headers
                 rows = []

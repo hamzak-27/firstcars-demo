@@ -172,11 +172,19 @@ FIELD MAPPING GUIDELINES:
 - passenger_name: Actual traveler name
 - from_location: Source city/location (city name only)
 - to_location: Destination city/location (city name only)
-- reporting_address: Full pickup address
-- drop_address: Full drop address
+- reporting_address: FULL pickup address with complete details (street, area, landmarks, city)
+- drop_address: FULL drop address with complete details (street, area, landmarks, city)
 - vehicle_group: Car type (Dzire, Innova, etc.)
 - duty_type: Leave empty for now
 - flight_train_number: Flight/train details if mentioned
+
+ADDRESS EXTRACTION RULES:
+- For reporting_address: Extract the COMPLETE pickup address including street number, street name, area, landmarks, and city
+- For drop_address: Extract the COMPLETE drop/destination address including street number, street name, area, landmarks, and city
+- Include ALL address components mentioned in the source text
+- If multiple address lines are present, combine them into one complete address
+- Preserve important landmarks, building names, and location identifiers
+- Do NOT truncate or shorten addresses - extract them in full
 
 Return ONLY this JSON format:
 

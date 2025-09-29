@@ -1,0 +1,5 @@
+Customer,Booked By Name,Booked By Phone Number,Booked By Email,Passenger Name,Passenger Phone Number,Passenger Email,From (Service Location),To,Vehicle Group,Duty Type,Start Date,End Date,Rep. Time,Reporting Address,Drop Address,Flight/Train Number,Dispatch center,Remarks,Labels
+Corporate Client,Travel Coordinator,,,Guest,,,Enhanced_Multi_Booking_Extraction,,Swift Dzire,P2P-08HR 80KMS,,,09:00,,,,Central Dispatch,Extracted from table column: bookings,
+Corporate Client,Travel Coordinator,,,Guest,,,Enhanced_Multi_Booking_Extraction,,Swift Dzire,P2P-08HR 80KMS,,,09:00,,,,Central Dispatch,Additional booking 2 (auto-generated),
+Corporate Client,Travel Coordinator,,,Guest,,,Enhanced_Multi_Booking_Extraction,,Swift Dzire,P2P-08HR 80KMS,,,09:00,,,,Central Dispatch,Additional booking 3 (auto-generated),
+Corporate Client,Travel Coordinator,,,Guest,,,Enhanced_Multi_Booking_Extraction,,Swift Dzire,P2P-08HR 80KMS,,,09:00,,,,Central Dispatch,Additional booking 4 (auto-generated),
