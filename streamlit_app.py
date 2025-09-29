@@ -478,7 +478,7 @@ def main():
     multi_booking_processor = None
     try:
         from enhanced_multi_booking_processor import EnhancedMultiBookingProcessor
-        multi_booking_processor = EnhancedMultiBookingProcessor(openai_api_key=api_key)
+        multi_booking_processor = EnhancedMultiBookingProcessor(aws_region='ap-south-1', openai_api_key=api_key)
         if hasattr(multi_booking_processor, 'textract_available') and multi_booking_processor.textract_available:
             st.success("📊 Multi-Booking Table Processing is available! (Complex table layouts with multiple bookings)")
         else:

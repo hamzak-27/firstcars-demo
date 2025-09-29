@@ -32,7 +32,7 @@ def initialize_multi_booking_processor():
             st.error("❌ OpenAI API key not found. Please configure it in Streamlit secrets or .env file.")
             return None
         
-        processor = EnhancedMultiBookingProcessor(openai_api_key=api_key)
+        processor = EnhancedMultiBookingProcessor(aws_region='ap-south-1', openai_api_key=api_key)
         
         if not processor.textract_available:
             st.warning("⚠️ AWS Textract not available. Please configure AWS credentials.")

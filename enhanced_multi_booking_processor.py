@@ -18,8 +18,8 @@ logger = logging.getLogger(__name__)
 class EnhancedMultiBookingProcessor(EnhancedFormProcessor):
     """Enhanced processor for multi-booking tables with complex layouts"""
     
-    def __init__(self, aws_region: str = None):
-        super().__init__(aws_region, None)
+    def __init__(self, aws_region: str = None, openai_api_key: str = None):
+        super().__init__(aws_region, openai_api_key)
         
         # Field mappings for different table layouts
         self.field_mappings = {
