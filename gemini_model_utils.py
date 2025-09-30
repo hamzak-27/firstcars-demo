@@ -106,18 +106,24 @@ class GeminiModelManager:
             if not self.configured:
                 genai.configure(api_key=self.api_key)
             
-            # Configure safety settings to bypass blocks
-            safety_settings = {
-                genai.types.HarmCategory.HARM_CATEGORY_HATE_SPEECH: genai.types.HarmBlockThreshold.BLOCK_NONE,
-                genai.types.HarmCategory.HARM_CATEGORY_HARASSMENT: genai.types.HarmBlockThreshold.BLOCK_NONE,
-                genai.types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: genai.types.HarmBlockThreshold.BLOCK_NONE,
-                genai.types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: genai.types.HarmBlockThreshold.BLOCK_NONE,
-            }
-            
-            model = genai.GenerativeModel(
-                model_name,
-                safety_settings=safety_settings
-            )
+            # Try creating model without any safety settings first (most permissive)
+            try:
+                model = genai.GenerativeModel(
+                    model_name,
+                    safety_settings=None  # Completely disable safety settings at model level
+                )
+            except Exception:
+                # If that fails, try with explicit BLOCK_NONE settings
+                safety_settings = {
+                    genai.types.HarmCategory.HARM_CATEGORY_HATE_SPEECH: genai.types.HarmBlockThreshold.BLOCK_NONE,
+                    genai.types.HarmCategory.HARM_CATEGORY_HARASSMENT: genai.types.HarmBlockThreshold.BLOCK_NONE,
+                    genai.types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: genai.types.HarmBlockThreshold.BLOCK_NONE,
+                    genai.types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: genai.types.HarmBlockThreshold.BLOCK_NONE,
+                }
+                model = genai.GenerativeModel(
+                    model_name,
+                    safety_settings=safety_settings
+                )
             return model, model_name
             
         except Exception as e:

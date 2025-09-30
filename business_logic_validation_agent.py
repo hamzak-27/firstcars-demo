@@ -913,45 +913,24 @@ Return ONLY the JSON object with corrected values."""
     def _create_safe_business_validation_prompt(self, original_content: str, current_booking: Dict) -> str:
         """Create a business-focused prompt that avoids safety filter triggers"""
         
-        prompt = f"""You are a professional car rental booking validation assistant. Please analyze this business booking request and provide validation in JSON format.
+        prompt = f"""Extract and validate booking details from this content.
 
-**BUSINESS VALIDATION TASK:**
-Review the booking information and original content, then provide validated data according to our business rules.
+Current data: {json.dumps(current_booking, indent=2)}
 
-**CURRENT BOOKING DATA:**
-{json.dumps(current_booking, indent=2)}
+Original content: {original_content[:800]}
 
-**ORIGINAL BOOKING CONTENT:**
-{original_content[:1500]}  
-
-**VALIDATION REQUIREMENTS:**
-1. **City Names**: Ensure From/To contain only standardized city names (Chennai, Mumbai, Delhi, Bangalore, Pune, etc.)
-2. **Passenger Details**: Extract complete passenger name, phone (10 digits), email (or "NA" if missing)
-3. **Date Intelligence**: Parse dates from content, handle relative dates like "tomorrow", set end_date = start_date if missing
-4. **Duty Type**: Apply corporate package logic:
-   - G2G/P2P detection based on corporate patterns
-   - 04HR 40KMS for airport drops
-   - 08HR 80KMS for local/disposal  
-   - Outstation [distance]KMS for different cities
-5. **Remarks Enhancement**: Extract ALL additional booking information not in structured fields
-
-**RESPOND WITH VALID JSON:**
+Provide clean data in JSON:
 {{
-    "validated_data": {{
-        "from_city": "standardized city name",
-        "to_city": "standardized city name", 
-        "passenger_name": "full name or NA",
-        "passenger_phone": "10 digit number or NA",
-        "passenger_email": "email or NA",
-        "start_date": "YYYY-MM-DD format",
-        "end_date": "YYYY-MM-DD format",
-        "duty_type": "G2G-[package] or P2P-[package]",
-        "enhanced_remarks": "all extra booking information not captured elsewhere"
-    }},
-    "validation_notes": "brief explanation of changes made"
-}}
-
-Ensure all fields are properly validated according to the business rules above."""
+    "from_city": "city name",
+    "to_city": "city name", 
+    "passenger_name": "name or NA",
+    "passenger_phone": "10 digits or NA",
+    "passenger_email": "email or NA",
+    "start_date": "YYYY-MM-DD",
+    "end_date": "YYYY-MM-DD",
+    "duty_type": "service type",
+    "remarks": "additional notes"
+}}"""
         
         return prompt
     
@@ -990,7 +969,8 @@ Ensure all fields are properly validated according to the business rules above."
             'start_date': 'Start Date',
             'end_date': 'End Date', 
             'duty_type': 'Duty Type',
-            'enhanced_remarks': 'Remarks'
+            'remarks': 'Remarks',
+            'enhanced_remarks': 'Remarks'  # Backward compatibility
         }
         
         for ai_field, df_column in field_mappings.items():
@@ -1281,47 +1261,15 @@ Ensure all fields are properly validated according to the business rules above."
             'flight': str(df.iloc[row_idx]['Flight/Train Number'])
         }
         
-        prompt = f"""You are an expert car rental booking validation agent. Your task is to analyze the entire email content and extract ALL additional information that should go in the REMARKS column.
+        prompt = f"""Extract additional booking notes from this email that aren't in the structured data.
 
-**ANALYSIS PROCESS - FOLLOW STEP BY STEP:**
-
-1. **FIRST: READ AND UNDERSTAND THE ENTIRE CONTENT**
-   - Analyze the complete email/booking request
-   - Understand the context, relationships, and all mentioned details
-   - Identify what information is already captured in structured fields
-   - Identify what extra information remains uncaptured
-
-2. **EXTRACT UNCAPTURED INFORMATION:**
-   - Driver name and contact details (if mentioned)
-   - Special instructions or preferences from the booker
-   - Multiple flight details and numbers
-   - Emergency contacts or additional contact persons
-   - Special requirements (wheelchair access, child seat, etc.)
-   - Billing instructions or payment details
-   - Meeting points or specific pickup instructions
-   - Additional context, notes, or observations from the email
-   - Any other relevant information not in structured fields
-
-3. **CRITICAL REQUIREMENT:**
-   - ALL extra information provided by the booker which does not fit into the preexisting fields MUST be put into this field
-   - NO INFORMATION should be omitted that is present in the mail
-   - Do NOT include system-generated messages or processing information
-   - Focus ONLY on actual booking-related information from the original email
-
-**CURRENT STRUCTURED BOOKING DATA (already captured):**
+Structured data already captured:
 {current_booking}
 
-**ORIGINAL EMAIL/CONTENT TO ANALYZE:**
-{original_content}
+Original email:
+{original_content[:600]}
 
-**INSTRUCTIONS:**
-- Analyze the entire content thoroughly
-- Extract ONLY the additional information NOT already in the structured fields above
-- Return clean, readable remarks text (no JSON, no formatting)
-- If no additional information exists, return empty string
-- Focus on information that would be useful for the driver or operations team
-
-**OUTPUT:** Return only the remarks text containing uncaptured information from the email."""
+Return only additional details that would be useful for the driver or operations team. If no additional details, return empty string."""
         
         try:
             response = self.model.generate_content(
