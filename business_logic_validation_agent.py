@@ -68,7 +68,8 @@ class BusinessLogicValidationAgent:
         # Configure OpenAI if available
         if OPENAI_AVAILABLE and self.api_key and self.api_key != "test-key":
             try:
-                self.client = create_openai_client(self.api_key)
+                client_result, model_name = create_openai_client(self.api_key, self.model_name)
+                self.client = client_result
                 if self.client:
                     logger.info(f"Successfully configured OpenAI client with model: {self.model_name}")
                 else:
@@ -368,6 +369,9 @@ class BusinessLogicValidationAgent:
         # 9. Validate and clean other fields
         df = self._validate_other_fields(df, row_idx)
         
+        # 10. Apply final post-processing rules (Corporate and Booked By to NA, address handling)
+        df = self._apply_final_post_processing(df, row_idx)
+        
         return df
     
     def _enhance_duty_type(self, df: pd.DataFrame, row_idx: int, original_content: str) -> pd.DataFrame:
@@ -593,6 +597,136 @@ class BusinessLogicValidationAgent:
         else:  # 53-59 minutes -> next hour (60)
             return 60
     
+    def _round_time_to_15_minutes(self, time_str: str) -> str:
+        """Round time string to nearest 15-minute interval"""
+        
+        if not time_str or time_str == "NA" or str(time_str).strip() == "":
+            return "NA"
+        
+        try:
+            # Parse time string (handle various formats)
+            time_str = str(time_str).strip()
+            
+            # Handle HH:MM format
+            if ':' in time_str:
+                parts = time_str.split(':')
+                if len(parts) >= 2:
+                    hour = int(parts[0])
+                    minute = int(parts[1])
+                else:
+                    return "NA"
+            # Handle HHMM format
+            elif len(time_str) in [3, 4] and time_str.isdigit():
+                if len(time_str) == 3:  # HMM format like 915
+                    hour = int(time_str[0])
+                    minute = int(time_str[1:3])
+                else:  # HHMM format like 0915
+                    hour = int(time_str[:2])
+                    minute = int(time_str[2:4])
+            else:
+                return "NA"
+            
+            # Validate hour and minute ranges
+            if not (0 <= hour <= 23 and 0 <= minute <= 59):
+                return "NA"
+            
+            # Round to nearest 15-minute interval
+            # 0-7 minutes → round down to 0
+            # 8-22 minutes → round to 15
+            # 23-37 minutes → round to 30 
+            # 38-52 minutes → round to 45
+            # 53-59 minutes → round up to next hour
+            if minute <= 7:
+                rounded_minute = 0
+            elif minute <= 22:
+                rounded_minute = 15
+            elif minute <= 37:
+                rounded_minute = 30
+            elif minute <= 52:
+                rounded_minute = 45
+            else:  # 53-59
+                rounded_minute = 0
+                hour = (hour + 1) % 24  # Handle 23:55 → 00:00
+            
+            # Format as HH:MM
+            return f"{hour:02d}:{rounded_minute:02d}"
+            
+        except (ValueError, IndexError) as e:
+            logger.warning(f"Failed to parse time '{time_str}': {e}")
+            return "NA"
+    
+    def _detect_and_handle_round_trips(self, df: pd.DataFrame, row_idx: int, original_content: str) -> pd.DataFrame:
+        """Detect round trips and set both From and To to the same starting city"""
+        
+        content_lower = original_content.lower()
+        from_location = str(df.iloc[row_idx]['From (Service Location)']).strip()
+        to_location = str(df.iloc[row_idx]['To']).strip()
+        
+        # Patterns that indicate round trips
+        round_trip_patterns = [
+            'round trip', 'return journey', 'return trip', 'back to', 
+            'return to', 'round journey', 'two way', 'return back'
+        ]
+        
+        # Check if any round trip pattern exists in content
+        is_round_trip = any(pattern in content_lower for pattern in round_trip_patterns)
+        
+        # Also check for patterns like "A to B to A" or "Chennai to Bangalore to Chennai"
+        if not is_round_trip and from_location and to_location:
+            # Extract city names
+            from_city = self._extract_city_name(from_location.lower())
+            to_city = self._extract_city_name(to_location.lower())
+            
+            # Look for patterns like "city1 to city2 to city1" in content
+            if from_city and to_city and from_city != to_city:
+                # Check if content mentions returning to the origin
+                pattern_variations = [
+                    f"{from_city} to {to_city} to {from_city}",
+                    f"{from_city} to {to_city} back to {from_city}",
+                    f"{from_city} to {to_city} return to {from_city}",
+                    f"{from_city}-{to_city}-{from_city}"
+                ]
+                
+                is_round_trip = any(pattern in content_lower for pattern in pattern_variations)
+        
+        # If round trip detected, set both columns to the starting city
+        if is_round_trip and from_location:
+            starting_city = self._extract_city_name(from_location.lower())
+            if starting_city:
+                # Set both From and To to the starting city
+                standardized_city = self.city_mappings.get(starting_city, starting_city.title())
+                df.iloc[row_idx, df.columns.get_loc('From (Service Location)')] = standardized_city
+                df.iloc[row_idx, df.columns.get_loc('To')] = standardized_city
+                
+                logger.info(f"Round trip detected for row {row_idx}: setting both From and To to {standardized_city}")
+        
+        return df
+    
+    def _apply_final_post_processing(self, df: pd.DataFrame, row_idx: int) -> pd.DataFrame:
+        """Apply final post-processing rules: Corporate/Booked By = NA, address handling"""
+        
+        # Set Corporate and Booked By columns to NA (always)
+        if 'Corporate' in df.columns:
+            df.iloc[row_idx, df.columns.get_loc('Corporate')] = 'NA'
+        if 'Booked By' in df.columns:
+            df.iloc[row_idx, df.columns.get_loc('Booked By')] = 'NA'
+        
+        # Set drop address handling (only reporting address)
+        if 'Drop Address' in df.columns:
+            reporting_addr = str(df.iloc[row_idx].get('Reporting Address', '')).strip()
+            if reporting_addr and reporting_addr != 'NA' and reporting_addr != 'nan':
+                # Only set drop address if explicitly different from reporting
+                # For now, leave empty as per requirements
+                df.iloc[row_idx, df.columns.get_loc('Drop Address')] = 'NA'
+        
+        # Apply 15-minute time rounding to current Rep. Time
+        current_time = str(df.iloc[row_idx]['Rep. Time']).strip()
+        if current_time and current_time != 'nan':
+            rounded_time = self._round_time_to_15_minutes(current_time)
+            df.iloc[row_idx, df.columns.get_loc('Rep. Time')] = rounded_time
+        
+        return df
+    
     def _standardize_city_names(self, df: pd.DataFrame, row_idx: int) -> pd.DataFrame:
         """Standardize city names in From/To columns"""
         
@@ -678,12 +812,14 @@ class BusinessLogicValidationAgent:
 
 **VALIDATION RULES:**
 
-1. **FROM AND TO COLUMNS:** Must always contain STANDARDIZED CITY NAMES ONLY
+1. **FROM AND TO COLUMNS - ROUND TRIP LOGIC:** Must always contain STANDARDIZED CITY NAMES ONLY
    - Extract city names from addresses/locations using the city mapping database
    - Remove street addresses, landmarks, building names
    - Example: "9B2, DABC Apartments, Nolambur, Chennai" → "Chennai"
    - Available cities include: {', '.join(city_sample)}... (and {len(self.city_mappings)-20} more)
    - Use exact city names as they appear in the database
+   - **ROUND TRIP DETECTION:** For round trips (like Chennai to Bangalore to Chennai), set BOTH From and To columns to the SAME starting city (e.g., "Chennai" for both From and To)
+   - Look for patterns like "A to B back to A", "return journey", "round trip", or itineraries showing return to origin
 
 2. **PASSENGER DETAILS:** Extract ALL available passenger information
    - If no passenger name mentioned → put "NA"
@@ -691,13 +827,23 @@ class BusinessLogicValidationAgent:
    - Clean phone numbers: remove +91, spaces, hyphens (keep 10 digits only)
    - If no details available → put "NA"
 
-3. **START AND END DATE:** Apply intelligent reasoning
+3. **REPORTING TIME - 15 MINUTE INTERVALS:** Apply strict 15-minute rounding
+   - Times MUST be rounded to 15-minute intervals: 04:00, 04:15, 04:30, 04:45, 05:00, etc.
+   - Rounding logic: 4:10 → 4:00; 4:25 → 4:15; 4:43 → 4:30; 4:55 → 4:45; 4:58 → 5:00
+   - Always return time in HH:MM format (24-hour)
+
+4. **ADDRESS HANDLING:**
+   - **Reporting Address:** Set this to the pickup/service location address
+   - **Drop Address:** Leave empty/NA unless explicitly different from reporting address
+   - Only set drop address if specifically mentioned as different location
+
+5. **START AND END DATE:** Apply intelligent reasoning
    - Parse relative dates: "tomorrow", "next Monday", "Saturday, October 04, 2025"
    - Convert to YYYY-MM-DD format
    - If only start date given, end date = start date (same day service)
    - Use context clues and current date for estimation
 
-4. **DUTY TYPE LOGIC - EXACT IMPLEMENTATION:**
+6. **DUTY TYPE LOGIC - EXACT IMPLEMENTATION:**
    **STEP 1: Corporate Detection & G2G/P2P Classification**
    - Identify corporate/company name from email content
    - Check against Corporate CSV database: {', '.join(corporate_sample)}... (and {len(self.corporate_mappings)-20} more)
@@ -755,72 +901,92 @@ class BusinessLogicValidationAgent:
 Return ONLY the JSON object with corrected values."""
             
             # Create OpenAI messages
-            messages = create_chat_messages(validation_prompt)
+            system_prompt = "You are a business logic validation assistant that analyzes booking data and returns properly formatted JSON responses."
+            messages = create_chat_messages(system_prompt, validation_prompt)
             
-            # Call OpenAI API
-            response = self.client.chat.completions.create(
-                model=self.model_name,
+            # Call OpenAI API using manager
+            response_text, metadata = self.client.create_completion(
                 messages=messages,
+                model=self.model_name,
                 temperature=0.1,
                 max_tokens=800,
-                top_p=0.8
+                force_json=True
             )
             
-            if response and response.choices and len(response.choices) > 0:
-                response_text = response.choices[0].message.content.strip()
+            # Parse JSON response
+            try:
+                # Extract JSON from response
+                if '```json' in response_text:
+                    json_start = response_text.find('```json') + 7
+                    json_end = response_text.find('```', json_start)
+                    response_text = response_text[json_start:json_end].strip()
+                elif '```' in response_text:
+                    json_start = response_text.find('```') + 3
+                    json_end = response_text.rfind('```')
+                    response_text = response_text[json_start:json_end].strip()
                 
-                # Parse JSON response
-                try:
-                    # Extract JSON from response
-                    if '```json' in response_text:
-                        json_start = response_text.find('```json') + 7
-                        json_end = response_text.find('```', json_start)
-                        response_text = response_text[json_start:json_end].strip()
-                    elif '```' in response_text:
-                        json_start = response_text.find('```') + 3
-                        json_end = response_text.rfind('```')
-                        response_text = response_text[json_start:json_end].strip()
+                # Find JSON boundaries
+                start = response_text.find('{')
+                end = response_text.rfind('}') + 1
+                
+                if start >= 0 and end > start:
+                    json_text = response_text[start:end]
+                    validated_data = json.loads(json_text)
                     
-                    # Find JSON boundaries
-                    start = response_text.find('{')
-                    end = response_text.rfind('}') + 1
+                    # Update DataFrame with validated data
+                    if 'from_location' in validated_data:
+                        df.iloc[row_idx, df.columns.get_loc('From (Service Location)')] = validated_data['from_location']
+                    if 'to_location' in validated_data:
+                        df.iloc[row_idx, df.columns.get_loc('To')] = validated_data['to_location']
+                    if 'passenger_name' in validated_data:
+                        df.iloc[row_idx, df.columns.get_loc('Passenger Name')] = validated_data['passenger_name']
+                    if 'passenger_phone' in validated_data:
+                        df.iloc[row_idx, df.columns.get_loc('Passenger Phone Number')] = validated_data['passenger_phone']
+                    if 'passenger_email' in validated_data:
+                        df.iloc[row_idx, df.columns.get_loc('Passenger Email')] = validated_data['passenger_email']
+                    if 'start_date' in validated_data:
+                        df.iloc[row_idx, df.columns.get_loc('Start Date')] = validated_data['start_date']
+                    if 'end_date' in validated_data:
+                        df.iloc[row_idx, df.columns.get_loc('End Date')] = validated_data['end_date']
+                    if 'reporting_time' in validated_data:
+                        df.iloc[row_idx, df.columns.get_loc('Rep. Time')] = validated_data['reporting_time']
+                    if 'vehicle_group' in validated_data:
+                        df.iloc[row_idx, df.columns.get_loc('Vehicle Group')] = validated_data['vehicle_group']
+                    if 'duty_type' in validated_data:
+                        df.iloc[row_idx, df.columns.get_loc('Duty Type')] = validated_data['duty_type']
                     
-                    if start >= 0 and end > start:
-                        json_text = response_text[start:end]
-                        validated_data = json.loads(json_text)
-                        
-                        # Update DataFrame with validated data
-                        if 'from_location' in validated_data:
-                            df.iloc[row_idx, df.columns.get_loc('From (Service Location)')] = validated_data['from_location']
-                        if 'to_location' in validated_data:
-                            df.iloc[row_idx, df.columns.get_loc('To')] = validated_data['to_location']
-                        if 'passenger_name' in validated_data:
-                            df.iloc[row_idx, df.columns.get_loc('Passenger Name')] = validated_data['passenger_name']
-                        if 'passenger_phone' in validated_data:
-                            df.iloc[row_idx, df.columns.get_loc('Passenger Phone Number')] = validated_data['passenger_phone']
-                        if 'passenger_email' in validated_data:
-                            df.iloc[row_idx, df.columns.get_loc('Passenger Email')] = validated_data['passenger_email']
-                        if 'start_date' in validated_data:
-                            df.iloc[row_idx, df.columns.get_loc('Start Date')] = validated_data['start_date']
-                        if 'end_date' in validated_data:
-                            df.iloc[row_idx, df.columns.get_loc('End Date')] = validated_data['end_date']
-                        if 'reporting_time' in validated_data:
-                            df.iloc[row_idx, df.columns.get_loc('Rep. Time')] = validated_data['reporting_time']
-                        if 'vehicle_group' in validated_data:
-                            df.iloc[row_idx, df.columns.get_loc('Vehicle Group')] = validated_data['vehicle_group']
-                        if 'duty_type' in validated_data:
-                            df.iloc[row_idx, df.columns.get_loc('Duty Type')] = validated_data['duty_type']
-                        
-                        # Track cost
-                        input_tokens = response.usage.prompt_tokens
-                        output_tokens = response.usage.completion_tokens
-                        self._track_cost_with_tokens(input_tokens, output_tokens)
-                        
-                        logger.info(f"Comprehensive AI validation completed for row {row_idx}")
-                        
-                except json.JSONDecodeError as e:
-                    logger.warning(f"Failed to parse AI validation response: {e}")
-                    return self._rule_based_comprehensive_validation(df, row_idx, original_content)
+                    # Apply post-processing: time rounding
+                    if 'reporting_time' in validated_data:
+                        rounded_time = self._round_time_to_15_minutes(validated_data['reporting_time'])
+                        df.iloc[row_idx, df.columns.get_loc('Rep. Time')] = rounded_time
+                    
+                    # Apply post-processing: detect and handle round trips
+                    df = self._detect_and_handle_round_trips(df, row_idx, original_content)
+                    
+                    # Set Corporate and Booked By columns to NA (always)
+                    if 'Corporate' in df.columns:
+                        df.iloc[row_idx, df.columns.get_loc('Corporate')] = 'NA'
+                    if 'Booked By' in df.columns:
+                        df.iloc[row_idx, df.columns.get_loc('Booked By')] = 'NA'
+                    
+                    # Set drop address handling (only reporting address)
+                    if 'Drop Address' in df.columns:
+                        reporting_addr = str(df.iloc[row_idx].get('Reporting Address', '')).strip()
+                        if reporting_addr and reporting_addr != 'NA' and reporting_addr != 'nan':
+                            # Only set drop address if explicitly different from reporting
+                            # For now, leave empty as per requirements
+                            df.iloc[row_idx, df.columns.get_loc('Drop Address')] = 'NA'
+                    
+                    # Track cost
+                    input_tokens = metadata['input_tokens']
+                    output_tokens = metadata['output_tokens']
+                    self._track_cost_with_tokens(input_tokens, output_tokens)
+                    
+                    logger.info(f"Comprehensive AI validation completed for row {row_idx}")
+                    
+            except json.JSONDecodeError as e:
+                logger.warning(f"Failed to parse AI validation response: {e}")
+                return self._rule_based_comprehensive_validation(df, row_idx, original_content)
             
         except Exception as e:
             logger.error(f"AI comprehensive validation failed: {e}")
@@ -842,22 +1008,17 @@ Return ONLY the JSON object with corrected values."""
         
         try:
             # Create OpenAI messages
-            messages = create_chat_messages(safe_prompt)
+            system_prompt = "You are a business logic validation assistant that analyzes booking data and returns properly formatted JSON responses."
+            messages = create_chat_messages(system_prompt, safe_prompt)
             
-            # Call OpenAI API with conservative settings
-            response = self.client.chat.completions.create(
-                model=self.model_name,
+            # Call OpenAI API with conservative settings using manager
+            response_text, metadata = self.client.create_completion(
                 messages=messages,
+                model=self.model_name,
                 temperature=0.1,  # Very low temperature for consistency
                 max_tokens=1000,
-                top_p=0.8
+                force_json=True
             )
-            
-            # Check if we got a valid response
-            if not response or not response.choices or len(response.choices) == 0:
-                raise Exception("Empty response from AI model")
-            
-            response_text = response.choices[0].message.content.strip()
             
             # Parse JSON response
             try:
@@ -877,8 +1038,8 @@ Return ONLY the JSON object with corrected values."""
                 df = self._apply_ai_validation_results(df, row_idx, validation_result)
                 
                 # Track cost with token usage
-                input_tokens = response.usage.prompt_tokens
-                output_tokens = response.usage.completion_tokens
+                input_tokens = metadata['input_tokens']
+                output_tokens = metadata['output_tokens']
                 self._track_cost_with_tokens(input_tokens, output_tokens)
                 
                 logger.info(f"AI comprehensive validation completed successfully for row {row_idx}")
@@ -937,11 +1098,13 @@ Provide clean data in JSON:
     def _apply_ai_validation_results(self, df: pd.DataFrame, row_idx: int, validation_result: Dict) -> pd.DataFrame:
         """Apply AI validation results to the DataFrame"""
         
-        if 'validated_data' not in validation_result:
-            logger.warning("No validated_data in AI response")
-            return df
-        
-        validated_data = validation_result['validated_data']
+        # Handle both nested and flat JSON responses
+        if 'validated_data' in validation_result:
+            validated_data = validation_result['validated_data']
+        else:
+            # Assume flat JSON response
+            validated_data = validation_result
+            logger.debug("Using flat JSON response for validation")
         
         # Apply validated fields if they exist and are not empty
         field_mappings = {
@@ -1257,28 +1420,23 @@ Return only additional details that would be useful for the driver or operations
         
         try:
             # Create OpenAI messages
-            messages = create_chat_messages(prompt)
+            system_prompt = "You are a helpful assistant that extracts additional booking information and returns concise, relevant details."
+            messages = create_chat_messages(system_prompt, prompt)
             
-            # Call OpenAI API
-            response = self.client.chat.completions.create(
-                model=self.model_name,
+            # Call OpenAI API using manager
+            response_text, metadata = self.client.create_completion(
                 messages=messages,
+                model=self.model_name,
                 temperature=0.1,
-                max_tokens=500,
-                top_p=0.8
+                max_tokens=500
             )
             
-            if response and response.choices and len(response.choices) > 0:
-                remarks = response.choices[0].message.content.strip()
-                
-                # Track cost with token usage
-                input_tokens = response.usage.prompt_tokens
-                output_tokens = response.usage.completion_tokens
-                self._track_cost_with_tokens(input_tokens, output_tokens)
-                
-                return remarks
-            else:
-                return ""
+            # Track cost with token usage
+            input_tokens = metadata['input_tokens']
+            output_tokens = metadata['output_tokens']
+            self._track_cost_with_tokens(input_tokens, output_tokens)
+            
+            return response_text.strip()
                 
         except Exception as e:
             logger.error(f"AI remarks extraction failed: {e}")

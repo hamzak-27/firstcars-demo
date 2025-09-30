@@ -18,8 +18,8 @@ def main():
     print("   📋 Vertical columns (Cab 1, Cab 2, Cab 3, Cab 4)")
     print("   📝 Form tables (Travel Requisition Form)")
     print()
-    print("💰 Cost per email: ₹0.0349 (using Gemini 2.5 Flash)")
-    print("💰 1000 emails/month: Only ₹35")
+    print("💰 Cost per email: ₹0.0338 (using OpenAI GPT-4o-mini - 82% savings!)")
+    print("💰 1000 emails/month: Only ₹33.8 (vs ₹190 with Gemini)")
     print()
     print("🚀 Starting enhanced Streamlit app...")
     print("📱 App will open in your browser at: http://localhost:8501")
@@ -37,10 +37,10 @@ def main():
     print()
     
     # Set the environment variable for the session
-    # Note: Set your GEMINI_API_KEY environment variable or configure in the app
-    if 'GEMINI_API_KEY' not in os.environ:
-        print("⚠️ GEMINI_API_KEY not found in environment variables")
-        print("You can set it in the app interface or export GEMINI_API_KEY=your_key")
+    # Note: Set your OPENAI_API_KEY environment variable or configure in the app
+    if 'OPENAI_API_KEY' not in os.environ:
+        print("⚠️ OPENAI_API_KEY not found in environment variables")
+        print("You can set it in the app interface or export OPENAI_API_KEY=your_key")
     
     try:
         subprocess.run([sys.executable, "-m", "streamlit", "run", "car_rental_app.py"])

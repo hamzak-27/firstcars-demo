@@ -31,7 +31,7 @@ def check_api_key():
     """Check for API key configuration"""
     print("\n🔑 Checking API key configuration...")
     
-    api_key = os.getenv('GEMINI_API_KEY') or os.getenv('GOOGLE_AI_API_KEY')
+    api_key = os.getenv('OPENAI_API_KEY')
     
     if api_key:
         print("✅ API key found in environment variables")
@@ -39,9 +39,9 @@ def check_api_key():
     else:
         print("⚠️ No API key found in environment variables")
         print("\nYou can configure your API key in the Streamlit app or set it as an environment variable:")
-        print("- Windows: set GEMINI_API_KEY=your-api-key-here")
-        print("- macOS/Linux: export GEMINI_API_KEY=your-api-key-here")
-        print("\nGet your API key from: https://makersuite.google.com/app/apikey")
+        print("- Windows: set OPENAI_API_KEY=your-api-key-here")
+        print("- macOS/Linux: export OPENAI_API_KEY=your-api-key-here")
+        print("\nGet your API key from: https://platform.openai.com/account/api-keys")
         return True  # Not a blocking issue
 
 def start_streamlit():

@@ -167,19 +167,6 @@ Return JSON:
     "reasoning": "brief explanation",
     "detected_duty_type": "drop|disposal|outstation|unknown"
 }}"""
-    
-    "business_rule_applied": "single_multi_day_8_80|single_outstation|single_drop_4_40|multiple_drops_same_day|multiple_alternate_days|multiple_vehicle_changes",
-    
-    "booking_classification": {{
-        "booking_type": "single|multiple",
-        "booking_count": 1-10,
-        "confidence_score": 0.0-1.0
-    }},
-    
-    "reasoning": "Detailed explanation of why this classification was chosen based on business rules"
-}}
-
-CLASSIFY NOW:"""
 
     def classify_content(self, content: str, source_type: str = "email") -> ClassificationResult:
         """
