@@ -27,17 +27,17 @@ def test_complete_multibooking_pipeline():
     print("3. Apply validation agent to all rows")
     print("4. Display the final complete DataFrame\n")
     
-    # Check for Gemini API key
-    gemini_key = os.getenv('GEMINI_API_KEY') or os.getenv('GOOGLE_AI_API_KEY')
-    if gemini_key:
-        print(f"✅ Gemini API key found for validation")
+    # Check for OpenAI API key
+    openai_key = os.getenv('OPENAI_API_KEY')
+    if openai_key:
+        print(f"✅ OpenAI API key found for agents")
     else:
-        print("⚠️  No Gemini API key found - validation will use fallback logic")
+        print("⚠️  No OPENAI_API_KEY found - agents will use fallback logic where possible")
     
     # Initialize the orchestrator
     print("\n🤖 INITIALIZING MULTI-AGENT ORCHESTRATOR:")
     try:
-        orchestrator = CompleteMultiAgentOrchestrator(api_key=gemini_key)
+        orchestrator = CompleteMultiAgentOrchestrator(api_key=openai_key)
         print("✅ Orchestrator initialized successfully")
     except Exception as e:
         print(f"❌ Error initializing orchestrator: {e}")

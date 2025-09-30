@@ -10,7 +10,7 @@ import pandas as pd
 from typing import Dict, List, Optional, Any, Tuple
 
 # Import all agents
-from gemma_classification_agent import GemmaClassificationAgent, ClassificationResult
+from openai_classification_agent import OpenAIClassificationAgent, ClassificationResult
 from extraction_router import ExtractionRouter
 from business_logic_validation_agent import BusinessLogicValidationAgent
 from base_extraction_agent import ExtractionResult
@@ -22,9 +22,9 @@ class CompleteMultiAgentOrchestrator:
     Complete orchestrator for the multi-agent car rental booking system
     
     Pipeline Flow:
-    1. Classification Agent (Gemma) → Determines single vs multiple bookings
+    1. Classification Agent (OpenAI) → Determines single vs multiple bookings
     2. Extraction Router → Routes to appropriate extraction agent
-    3. Single/Multiple Booking Agents (Gemma) → Extract structured data to DataFrame
+    3. Single/Multiple Booking Agents (OpenAI) → Extract structured data to DataFrame
     4. Business Logic Validation Agent → Apply business rules and enhance DataFrame
     
     Final Output: Validated DataFrame with all business rules applied
@@ -37,7 +37,7 @@ class CompleteMultiAgentOrchestrator:
         
         # Initialize all agents
         try:
-            self.classification_agent = GemmaClassificationAgent(api_key=api_key)
+            self.classification_agent = OpenAIClassificationAgent(api_key=api_key)
             logger.info("✅ Classification agent initialized")
         except Exception as e:
             logger.error(f"❌ Classification agent failed: {str(e)}")
@@ -110,7 +110,7 @@ class CompleteMultiAgentOrchestrator:
                 logger.info("🎯 Detected preprocessed multi-booking content - bypassing classification")
                 
                 # Create mock classification for preprocessed content
-                from gemma_classification_agent import BookingType, DutyType
+                from openai_classification_agent import BookingType, DutyType
                 booking_count = content.count("Booking ") if "Booking " in content else 1
                 
                 class MockClassification:
@@ -141,8 +141,8 @@ class CompleteMultiAgentOrchestrator:
                     raise ValueError("Classification agent not available")
                 
                 classification_result = self.classification_agent.classify_content(content, source_type)
-                result['pipeline_stages']['classification'] = {
-                    'agent': 'GemmaClassificationAgent',
+            result['pipeline_stages']['classification'] = {
+                    'agent': 'OpenAIClassificationAgent',
                     'booking_type': classification_result.booking_type.value,
                     'booking_count': classification_result.booking_count,
                     'confidence': classification_result.confidence_score,
@@ -172,7 +172,7 @@ class CompleteMultiAgentOrchestrator:
             if "TABLE EXTRACTION RESULTS" in content:
                 result['metadata']['agents_used'].append('PreprocessedBypass')
             else:
-                result['metadata']['agents_used'].append('GemmaClassificationAgent')
+                result['metadata']['agents_used'].append('OpenAIClassificationAgent')
             
             logger.info(f"✅ Classification: {booking_type_str} "
                        f"({classification_result.booking_count} bookings)")

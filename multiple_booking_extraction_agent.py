@@ -10,7 +10,7 @@ import re
 from typing import Dict, List, Optional, Any
 
 from base_extraction_agent import BaseExtractionAgent, BookingData, ExtractionResult
-from gemma_classification_agent import ClassificationResult
+from openai_classification_agent import ClassificationResult
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +25,7 @@ class MultipleBookingExtractionAgent(BaseExtractionAgent):
     - Bulk processing
     """
     
-    def __init__(self, api_key: str = None, model_name: str = "models/gemini-2.5-flash"):
+    def __init__(self, api_key: str = None, model_name: str = "gpt-4o-mini"):
         """Initialize multiple booking extraction agent"""
         super().__init__(api_key, model_name)
         
@@ -77,9 +77,9 @@ class MultipleBookingExtractionAgent(BaseExtractionAgent):
         logger.info(f"Starting multiple booking extraction ({len(content)} chars, expecting {expected_count} bookings)")
         
         try:
-            # Use Gemma API if available, otherwise fallback
-            if self.model:
-                return self._extract_with_gemma(content, classification_result, start_time)
+            # Use OpenAI API if available, otherwise fallback
+            if self.client:
+                return self._extract_with_openai(content, classification_result, start_time)
             else:
                 return self._extract_with_fallback(content, classification_result, start_time)
                 
@@ -98,15 +98,15 @@ class MultipleBookingExtractionAgent(BaseExtractionAgent):
                 error_message=str(e)
             )
     
-    def _extract_with_gemma(self, content: str, classification_result: ClassificationResult, start_time: float) -> ExtractionResult:
-        """Extract using Gemma API"""
+    def _extract_with_openai(self, content: str, classification_result: ClassificationResult, start_time: float) -> ExtractionResult:
+        """Extract using OpenAI API"""
         
         try:
             # Build extraction prompt
             prompt = self._build_extraction_prompt(content, classification_result)
             
             # Generate response
-            response_text, cost = self._generate_gemma_response(prompt)
+            response_text, cost = self._generate_openai_response(prompt)
             
             # Parse response
             parsed_data = self._parse_json_response(response_text)
@@ -117,7 +117,7 @@ class MultipleBookingExtractionAgent(BaseExtractionAgent):
             
             for i, booking_dict in enumerate(bookings_list):
                 booking = self._create_booking_from_dict(booking_dict)
-                booking.extraction_method = f"multiple_booking_gemma_{i+1}"
+                booking.extraction_method = f"multiple_booking_openai_{i+1}"
                 bookings.append(booking)
             
             # Create DataFrame
@@ -134,19 +134,19 @@ class MultipleBookingExtractionAgent(BaseExtractionAgent):
                 confidence_score=parsed_data.get('confidence_score', 0.8),
                 processing_time=processing_time,
                 cost_inr=cost,
-                extraction_method="multiple_booking_gemma",
+                extraction_method="multiple_booking_openai",
                 metadata={
                     'classification_confidence': classification_result.confidence_score,
                     'detected_duty_type': classification_result.detected_duty_type.value,
                     'expected_booking_count': classification_result.booking_count,
                     'actual_booking_count': len(bookings),
                     'table_format_detected': parsed_data.get('table_format', 'unknown'),
-                    'gemma_response_length': len(response_text)
+                    'openai_response_length': len(response_text)
                 }
             )
             
         except Exception as e:
-            logger.error(f"Gemma extraction failed: {str(e)}")
+            logger.error(f"OpenAI extraction failed: {str(e)}")
             # Fallback to rule-based extraction
             return self._extract_with_fallback(content, classification_result, start_time, error=str(e))
     
