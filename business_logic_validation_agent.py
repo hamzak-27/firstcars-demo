@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 
 try:
     import google.generativeai as genai
+    from gemini_model_utils import create_gemini_model
     GEMMA_AVAILABLE = True
 except ImportError:
     GEMMA_AVAILABLE = False
@@ -66,8 +67,16 @@ class BusinessLogicValidationAgent:
         
         # Configure Gemini if available
         if GEMMA_AVAILABLE and self.api_key and self.api_key != "test-key":
-            genai.configure(api_key=self.api_key)
-            self.model = genai.GenerativeModel(model_name)
+            try:
+                self.model, actual_model_name = create_gemini_model(self.api_key, model_name)
+                if self.model:
+                    self.model_name = actual_model_name
+                    logger.info(f"Successfully configured Gemini model: {actual_model_name}")
+                else:
+                    logger.error(f"Failed to create any Gemini model: {actual_model_name}")
+            except Exception as e:
+                logger.error(f"Error creating Gemini model: {e}")
+                self.model = None
         else:
             self.model = None
         
@@ -83,13 +92,129 @@ class BusinessLogicValidationAgent:
         logger.info(f"BusinessLogicValidationAgent initialized")
     
     def _initialize_business_rules(self):
-        """Initialize all business rule mappings"""
+        """Initialize all business rule mappings from CSV files"""
         
-        # Vehicle standardization mappings
-        self.vehicle_mappings = {
+        # Load corporate mappings from CSV
+        self.corporate_mappings = self._load_corporate_mappings()
+        logger.info(f"Loaded {len(self.corporate_mappings)} corporate mappings")
+        
+        # Load city mappings from CSV
+        self.city_mappings = self._load_city_mappings()
+        logger.info(f"Loaded {len(self.city_mappings)} city mappings")
+        
+        # Load vehicle mappings (keep hardcoded for now, can be moved to CSV later)
+        self.vehicle_mappings = self._load_vehicle_mappings()
+        logger.info(f"Loaded {len(self.vehicle_mappings)} vehicle mappings")
+        
+        # Keep corporate patterns for backward compatibility
+        self.corporate_patterns = self.corporate_mappings
+    
+    def _load_corporate_mappings(self) -> Dict[str, Dict[str, str]]:
+        """Load corporate mappings from Corporate (1).csv"""
+        import csv
+        from pathlib import Path
+        
+        corporate_mappings = {}
+        
+        try:
+            csv_path = Path('Corporate (1).csv')
+            if csv_path.exists():
+                with open(csv_path, 'r', encoding='utf-8') as f:
+                    reader = csv.DictReader(f)
+                    for row in reader:
+                        corporate_name = row.get('Corporate', '').strip().upper()
+                        duty_type = row.get('Duty Type (G2G or P2P)', '').strip()
+                        approval_reqd = row.get('Approval Reqd (Yes or No)', '').strip()
+                        
+                        if corporate_name and duty_type:
+                            # Create mapping with both original and normalized names
+                            corporate_mappings[corporate_name.lower()] = {
+                                'name': corporate_name,
+                                'category': duty_type,
+                                'approval_required': approval_reqd
+                            }
+                            
+                            # Also add partial matches for common patterns
+                            if ' ' in corporate_name:
+                                parts = corporate_name.split()
+                                for part in parts:
+                                    if len(part) > 2:  # Skip short words
+                                        corporate_mappings[part.lower()] = {
+                                            'name': corporate_name,
+                                            'category': duty_type,
+                                            'approval_required': approval_reqd
+                                        }
+                
+                logger.info(f"Successfully loaded corporate mappings from {csv_path}")
+            else:
+                logger.warning(f"Corporate CSV file not found: {csv_path}")
+                
+        except Exception as e:
+            logger.error(f"Error loading corporate mappings: {e}")
+        
+        return corporate_mappings
+    
+    def _load_city_mappings(self) -> Dict[str, str]:
+        """Load city mappings from City(1).xlsx - Sheet1.csv"""
+        import csv
+        from pathlib import Path
+        
+        city_mappings = {}
+        
+        try:
+            csv_path = Path('City(1).xlsx - Sheet1.csv')
+            if csv_path.exists():
+                with open(csv_path, 'r', encoding='utf-8') as f:
+                    reader = csv.DictReader(f)
+                    for row in reader:
+                        # Skip empty rows
+                        city_name = row.get('City name (As per mail)', '').strip()
+                        dispatch_center = row.get('Dispatch Centre (To be entered in Indecab)', '').strip()
+                        
+                        if city_name and dispatch_center and dispatch_center != 'NA':
+                            # Map both original and lowercase
+                            city_mappings[city_name.lower()] = dispatch_center
+                            
+                            # Handle common variations
+                            city_name_clean = city_name.replace('\t', '').strip()
+                            city_mappings[city_name_clean.lower()] = dispatch_center
+                
+                logger.info(f"Successfully loaded city mappings from {csv_path}")
+            else:
+                logger.warning(f"City CSV file not found: {csv_path}")
+                # Fallback to hardcoded mappings
+                city_mappings = {
+                    'mumbai': 'Mumbai', 'bombay': 'Mumbai',
+                    'delhi': 'Delhi', 'new delhi': 'Delhi', 'ncr': 'Delhi',
+                    'bangalore': 'Bangalore', 'bengaluru': 'Bangalore',
+                    'pune': 'Pune', 'hyderabad': 'Hyderabad',
+                    'chennai': 'Chennai', 'madras': 'Chennai',
+                    'kolkata': 'Kolkata', 'calcutta': 'Kolkata',
+                    'gurgaon': 'Delhi', 'gurugram': 'Delhi',
+                    'noida': 'Delhi', 'faridabad': 'Delhi', 'ghaziabad': 'Delhi'
+                }
+                
+        except Exception as e:
+            logger.error(f"Error loading city mappings: {e}")
+            # Fallback mappings
+            city_mappings = {
+                'mumbai': 'Mumbai', 'bombay': 'Mumbai',
+                'delhi': 'Delhi', 'new delhi': 'Delhi',
+                'bangalore': 'Bangalore', 'bengaluru': 'Bangalore',
+                'pune': 'Pune', 'hyderabad': 'Hyderabad',
+                'chennai': 'Chennai', 'madras': 'Chennai',
+                'kolkata': 'Kolkata', 'calcutta': 'Kolkata'
+            }
+        
+        return city_mappings
+    
+    def _load_vehicle_mappings(self) -> Dict[str, str]:
+        """Load vehicle mappings (can be moved to CSV later)"""
+        return {
             'dzire': 'Swift Dzire',
             'swift dzire': 'Swift Dzire',
             'maruti dzire': 'Swift Dzire',
+            'suzuki dzire': 'Swift Dzire',
             'innova': 'Toyota Innova Crysta',
             'innova crysta': 'Toyota Innova Crysta',
             'toyota innova': 'Toyota Innova Crysta',
@@ -101,45 +226,6 @@ class BusinessLogicValidationAgent:
             'sedan': 'Swift Dzire',
             'suv': 'Toyota Innova Crysta',
             'hatchback': 'Maruti Swift'
-        }
-        
-        # City standardization mappings
-        self.city_mappings = {
-            'mumbai': 'Mumbai',
-            'bombay': 'Mumbai',
-            'delhi': 'Delhi',
-            'new delhi': 'Delhi',
-            'ncr': 'Delhi',
-            'bangalore': 'Bangalore',
-            'bengaluru': 'Bangalore',
-            'pune': 'Pune',
-            'hyderabad': 'Hyderabad',
-            'chennai': 'Chennai',
-            'madras': 'Chennai',
-            'kolkata': 'Kolkata',
-            'calcutta': 'Kolkata',
-            'gurgaon': 'Gurgaon',
-            'gurugram': 'Gurgaon',
-            'noida': 'Noida',
-            'faridabad': 'Faridabad',
-            'ghaziabad': 'Ghaziabad'
-        }
-        
-        # Corporate detection patterns
-        self.corporate_patterns = {
-            'accenture': {'name': 'Accenture India Ltd', 'category': 'G2G'},
-            'tcs': {'name': 'Tata Consultancy Services', 'category': 'G2G'},
-            'infosys': {'name': 'Infosys Limited', 'category': 'G2G'},
-            'wipro': {'name': 'Wipro Limited', 'category': 'G2G'},
-            'hcl': {'name': 'HCL Technologies', 'category': 'G2G'},
-            'cognizant': {'name': 'Cognizant Technology Solutions', 'category': 'G2G'},
-            'tech mahindra': {'name': 'Tech Mahindra', 'category': 'G2G'},
-            'capgemini': {'name': 'Capgemini India', 'category': 'G2G'},
-            'deloitte': {'name': 'Deloitte India', 'category': 'G2G'},
-            'pwc': {'name': 'PwC India', 'category': 'G2G'},
-            'microsoft': {'name': 'Microsoft India', 'category': 'G2G'},
-            'google': {'name': 'Google India', 'category': 'G2G'},
-            'amazon': {'name': 'Amazon India', 'category': 'G2G'}
         }
         
         # Dispatch center assignments based on cities
@@ -231,6 +317,16 @@ class BusinessLogicValidationAgent:
                                    original_content: str) -> pd.DataFrame:
         """Validate and enhance a single booking row"""
         
+        # STEP 1: Comprehensive AI-powered validation (if available)
+        if self.model and original_content.strip():
+            try:
+                df = self._comprehensive_booking_validation(df, row_idx, original_content)
+                logger.info(f"Comprehensive AI validation completed for row {row_idx}")
+            except Exception as e:
+                logger.warning(f"Comprehensive AI validation failed for row {row_idx}: {e}")
+                # Continue with rule-based validation as fallback
+        
+        # STEP 2: Rule-based validations (as fallback or enhancement)
         # 1. Validate and enhance duty type
         df = self._enhance_duty_type(df, row_idx, original_content)
         
@@ -253,7 +349,7 @@ class BusinessLogicValidationAgent:
         df = self._generate_labels(df, row_idx, classification_result)
         df = self._check_vip_status(df, row_idx, original_content)
         
-        # 8. Enhance remarks with all extra information
+        # 8. Enhance remarks with all extra information (CRITICAL - NO SYSTEM MESSAGES)
         df = self._enhance_remarks_with_extra_info(df, row_idx, original_content)
         
         # 9. Validate and clean other fields
@@ -538,6 +634,355 @@ class BusinessLogicValidationAgent:
         
         return df
     
+    def _comprehensive_booking_validation(self, df: pd.DataFrame, row_idx: int, original_content: str) -> pd.DataFrame:
+        """Comprehensive validation of all booking fields with AI assistance"""
+        
+        if not self.model:
+            logger.warning("No AI model available for comprehensive validation - using rule-based fallback")
+            return self._rule_based_comprehensive_validation(df, row_idx, original_content)
+        
+        try:
+            # Get current booking data
+            current_data = {
+                'customer': str(df.iloc[row_idx]['Customer']),
+                'passenger_name': str(df.iloc[row_idx]['Passenger Name']),
+                'passenger_phone': str(df.iloc[row_idx]['Passenger Phone Number']),
+                'passenger_email': str(df.iloc[row_idx]['Passenger Email']),
+                'from_location': str(df.iloc[row_idx]['From (Service Location)']),
+                'to_location': str(df.iloc[row_idx]['To']),
+                'vehicle_group': str(df.iloc[row_idx]['Vehicle Group']),
+                'start_date': str(df.iloc[row_idx]['Start Date']),
+                'end_date': str(df.iloc[row_idx]['End Date']),
+                'reporting_time': str(df.iloc[row_idx]['Rep. Time']),
+                'duty_type': str(df.iloc[row_idx]['Duty Type'])
+            }
+            
+            # Create a summary of available corporate and city mappings for the AI
+            corporate_sample = list(self.corporate_mappings.keys())[:20]  # First 20 for reference
+            city_sample = list(self.city_mappings.keys())[:20]  # First 20 for reference
+            
+            validation_prompt = f"""You are an expert car rental booking data validator with access to corporate and city mapping databases. Analyze the original email content and validate/correct the extracted booking data according to these CRITICAL RULES:
+
+**VALIDATION RULES:**
+
+1. **FROM AND TO COLUMNS:** Must always contain STANDARDIZED CITY NAMES ONLY
+   - Extract city names from addresses/locations using the city mapping database
+   - Remove street addresses, landmarks, building names
+   - Example: "9B2, DABC Apartments, Nolambur, Chennai" → "Chennai"
+   - Available cities include: {', '.join(city_sample)}... (and {len(self.city_mappings)-20} more)
+   - Use exact city names as they appear in the database
+
+2. **PASSENGER DETAILS:** Extract ALL available passenger information
+   - If no passenger name mentioned → put "NA"
+   - Extract phone number, email if available
+   - Clean phone numbers: remove +91, spaces, hyphens (keep 10 digits only)
+   - If no details available → put "NA"
+
+3. **START AND END DATE:** Apply intelligent reasoning
+   - Parse relative dates: "tomorrow", "next Monday", "Saturday, October 04, 2025"
+   - Convert to YYYY-MM-DD format
+   - If only start date given, end date = start date (same day service)
+   - Use context clues and current date for estimation
+
+4. **DUTY TYPE LOGIC - EXACT IMPLEMENTATION:**
+   **STEP 1: Corporate Detection & G2G/P2P Classification**
+   - Identify corporate/company name from email content
+   - Check against Corporate CSV database: {', '.join(corporate_sample)}... (and {len(self.corporate_mappings)-20} more)
+   - Each corporate has a predetermined G2G or P2P classification in the database
+   - If corporate not found in database → default to P2P
+   
+   **STEP 2: Package Type Detection**
+   - "Drop", "Airport Transfer", "Airport pickup", "Airport drop" → Use 04HR 40KMS
+   - "At disposal", "Local use", "Visit", "Whole day use", "Use as per guest instructions" → Use 08HR 80KMS
+   - No specific time/usage mentioned → Default to 08HR 80KMS
+   - "Outstation" trips or different from/to cities:
+     * Major cities (Mumbai, Pune, Hyderabad, Chennai, Delhi, Ahmedabad, Bangalore) → Outstation 250KMS
+     * Kolkata or any other cities → Outstation 300KMS
+   
+   **STEP 3: Final Format (MANDATORY)**
+   - G2G Corporate + Drop/Airport → "G2G-04HR 40KMS"
+   - G2G Corporate + Local/At disposal → "G2G-08HR 80KMS"
+   - G2G Corporate + Outstation (major cities) → "G2G-Outstation 250KMS"
+   - G2G Corporate + Outstation (Kolkata/others) → "G2G-Outstation 300KMS"
+   - P2P Corporate + Drop/Airport → "P2P-04HR 40KMS"
+   - P2P Corporate + Local/At disposal → "P2P-08HR 80KMS"
+   - P2P Corporate + Outstation (major cities) → "P2P-Outstation 250KMS"
+   - P2P Corporate + Outstation (Kolkata/others) → "P2P-Outstation 300KMS"
+   - Default fallback → "P2P-08HR 80KMS"
+
+**IMPORTANT PROCESSING RULES:**
+1. Always think step-by-step before extracting data
+2. Normalize vehicle names: "Dzire" → "Swift Dzire", "Crysta" → "Toyota Innova Crysta"
+3. Convert dates to YYYY-MM-DD format
+4. Convert times to HH:MM 24-hour format
+5. Clean phone numbers to 10 digits
+6. Use "NA" for genuinely missing information
+
+**CURRENT EXTRACTED DATA:**
+{current_data}
+
+**ORIGINAL EMAIL CONTENT:**
+{original_content}
+
+**TASK:** Analyze the original content, understand the context and relationships, then return ONLY the corrected values in JSON format:
+
+{{
+    "from_location": "city_name_only",
+    "to_location": "city_name_only", 
+    "passenger_name": "name_or_NA",
+    "passenger_phone": "10_digit_number_or_NA",
+    "passenger_email": "email_or_NA",
+    "start_date": "YYYY-MM-DD",
+    "end_date": "YYYY-MM-DD",
+    "reporting_time": "HH:MM",
+    "vehicle_group": "standardized_vehicle_name",
+    "duty_type": "exact_format_as_specified_above"
+}}
+
+Return ONLY the JSON object with corrected values."""
+            
+            response = self.model.generate_content(
+                validation_prompt,
+                generation_config=genai.types.GenerationConfig(
+                    temperature=0.1,
+                    max_output_tokens=800,
+                    top_p=0.8
+                )
+            )
+            
+            if response and hasattr(response, 'text') and response.text:
+                response_text = response.text.strip()
+                
+                # Parse JSON response
+                try:
+                    # Extract JSON from response
+                    if '```json' in response_text:
+                        json_start = response_text.find('```json') + 7
+                        json_end = response_text.find('```', json_start)
+                        response_text = response_text[json_start:json_end].strip()
+                    elif '```' in response_text:
+                        json_start = response_text.find('```') + 3
+                        json_end = response_text.rfind('```')
+                        response_text = response_text[json_start:json_end].strip()
+                    
+                    # Find JSON boundaries
+                    start = response_text.find('{')
+                    end = response_text.rfind('}') + 1
+                    
+                    if start >= 0 and end > start:
+                        json_text = response_text[start:end]
+                        validated_data = json.loads(json_text)
+                        
+                        # Update DataFrame with validated data
+                        if 'from_location' in validated_data:
+                            df.iloc[row_idx, df.columns.get_loc('From (Service Location)')] = validated_data['from_location']
+                        if 'to_location' in validated_data:
+                            df.iloc[row_idx, df.columns.get_loc('To')] = validated_data['to_location']
+                        if 'passenger_name' in validated_data:
+                            df.iloc[row_idx, df.columns.get_loc('Passenger Name')] = validated_data['passenger_name']
+                        if 'passenger_phone' in validated_data:
+                            df.iloc[row_idx, df.columns.get_loc('Passenger Phone Number')] = validated_data['passenger_phone']
+                        if 'passenger_email' in validated_data:
+                            df.iloc[row_idx, df.columns.get_loc('Passenger Email')] = validated_data['passenger_email']
+                        if 'start_date' in validated_data:
+                            df.iloc[row_idx, df.columns.get_loc('Start Date')] = validated_data['start_date']
+                        if 'end_date' in validated_data:
+                            df.iloc[row_idx, df.columns.get_loc('End Date')] = validated_data['end_date']
+                        if 'reporting_time' in validated_data:
+                            df.iloc[row_idx, df.columns.get_loc('Rep. Time')] = validated_data['reporting_time']
+                        if 'vehicle_group' in validated_data:
+                            df.iloc[row_idx, df.columns.get_loc('Vehicle Group')] = validated_data['vehicle_group']
+                        if 'duty_type' in validated_data:
+                            df.iloc[row_idx, df.columns.get_loc('Duty Type')] = validated_data['duty_type']
+                        
+                        # Track cost
+                        self._track_cost(validation_prompt, response_text)
+                        
+                        logger.info(f"Comprehensive AI validation completed for row {row_idx}")
+                        
+                except json.JSONDecodeError as e:
+                    logger.warning(f"Failed to parse AI validation response: {e}")
+                    return self._rule_based_comprehensive_validation(df, row_idx, original_content)
+            
+        except Exception as e:
+            logger.error(f"AI comprehensive validation failed: {e}")
+            return self._rule_based_comprehensive_validation(df, row_idx, original_content)
+        
+        return df
+    
+    def _rule_based_comprehensive_validation(self, df: pd.DataFrame, row_idx: int, original_content: str) -> pd.DataFrame:
+        """Rule-based fallback for comprehensive validation"""
+        
+        # Apply individual validation methods
+        df = self._validate_city_names(df, row_idx, original_content)
+        df = self._validate_passenger_details(df, row_idx, original_content)
+        df = self._validate_dates(df, row_idx, original_content)
+        df = self._validate_duty_type_comprehensive(df, row_idx, original_content)
+        
+        return df
+    
+    def _validate_city_names(self, df: pd.DataFrame, row_idx: int, original_content: str) -> pd.DataFrame:
+        """Ensure From/To columns contain only city names"""
+        
+        # Extract city from From location
+        from_loc = str(df.iloc[row_idx]['From (Service Location)'])
+        if from_loc and from_loc != 'nan':
+            city = self._extract_city_name(from_loc)
+            if city:
+                df.iloc[row_idx, df.columns.get_loc('From (Service Location)')] = city.title()
+        
+        # Extract city from To location
+        to_loc = str(df.iloc[row_idx]['To'])
+        if to_loc and to_loc != 'nan':
+            city = self._extract_city_name(to_loc)
+            if city:
+                df.iloc[row_idx, df.columns.get_loc('To')] = city.title()
+        
+        return df
+    
+    def _validate_passenger_details(self, df: pd.DataFrame, row_idx: int, original_content: str) -> pd.DataFrame:
+        """Extract and validate all passenger details"""
+        
+        # If no passenger name, set to NA
+        passenger_name = str(df.iloc[row_idx]['Passenger Name'])
+        if not passenger_name or passenger_name == 'nan' or passenger_name.strip() == '':
+            df.iloc[row_idx, df.columns.get_loc('Passenger Name')] = 'NA'
+        
+        # Clean phone number
+        phone = str(df.iloc[row_idx]['Passenger Phone Number'])
+        if phone and phone != 'nan':
+            # Remove +91, spaces, hyphens, keep only digits
+            cleaned_phone = re.sub(r'[^0-9]', '', phone)
+            if cleaned_phone.startswith('91') and len(cleaned_phone) == 12:
+                cleaned_phone = cleaned_phone[2:]  # Remove country code
+            
+            if len(cleaned_phone) == 10:
+                df.iloc[row_idx, df.columns.get_loc('Passenger Phone Number')] = cleaned_phone
+            else:
+                df.iloc[row_idx, df.columns.get_loc('Passenger Phone Number')] = 'NA'
+        else:
+            df.iloc[row_idx, df.columns.get_loc('Passenger Phone Number')] = 'NA'
+        
+        # Set email to NA if not available
+        email = str(df.iloc[row_idx]['Passenger Email'])
+        if not email or email == 'nan' or '@' not in email:
+            df.iloc[row_idx, df.columns.get_loc('Passenger Email')] = 'NA'
+        
+        return df
+    
+    def _validate_dates(self, df: pd.DataFrame, row_idx: int, original_content: str) -> pd.DataFrame:
+        """Apply intelligent date reasoning"""
+        
+        from datetime import datetime, timedelta
+        import re
+        
+        # Try to parse dates from content
+        content_lower = original_content.lower()
+        
+        # Look for date patterns
+        date_patterns = [
+            r'(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})',  # DD/MM/YYYY or MM/DD/YYYY
+            r'(\d{4}-\d{1,2}-\d{1,2})',  # YYYY-MM-DD
+            r'(tomorrow)',
+            r'(next\s+\w+)',  # next Monday, next Tuesday
+            r'(\w+day,\s*\w+\s+\d+,\s*\d{4})',  # Saturday, October 04, 2025
+        ]
+        
+        current_date = datetime.now().date()
+        start_date = None
+        
+        # Try to extract date
+        for pattern in date_patterns:
+            matches = re.findall(pattern, content_lower)
+            if matches:
+                date_text = matches[0]
+                
+                if 'tomorrow' in date_text:
+                    start_date = current_date + timedelta(days=1)
+                elif 'next' in date_text:
+                    # Simple logic for next weekday
+                    start_date = current_date + timedelta(days=7)
+                else:
+                    # Try to parse actual date
+                    try:
+                        # Handle different date formats
+                        if ',' in date_text and len(date_text) > 10:
+                            # Format like "Saturday, October 04, 2025"
+                            start_date = datetime.strptime(date_text.replace(',', ''), '%A %B %d %Y').date()
+                        elif '-' in date_text:
+                            start_date = datetime.strptime(date_text, '%Y-%m-%d').date()
+                        elif '/' in date_text:
+                            # Try both DD/MM/YYYY and MM/DD/YYYY
+                            try:
+                                start_date = datetime.strptime(date_text, '%d/%m/%Y').date()
+                            except:
+                                start_date = datetime.strptime(date_text, '%m/%d/%Y').date()
+                    except ValueError:
+                        continue
+                
+                if start_date:
+                    break
+        
+        # Set dates
+        if start_date:
+            df.iloc[row_idx, df.columns.get_loc('Start Date')] = start_date.strftime('%Y-%m-%d')
+            # If no end date specified, use start date
+            end_date_str = str(df.iloc[row_idx]['End Date'])
+            if not end_date_str or end_date_str == 'nan':
+                df.iloc[row_idx, df.columns.get_loc('End Date')] = start_date.strftime('%Y-%m-%d')
+        
+        return df
+    
+    def _validate_duty_type_comprehensive(self, df: pd.DataFrame, row_idx: int, original_content: str) -> pd.DataFrame:
+        """Apply exact duty type logic as specified"""
+        
+        content_lower = original_content.lower()
+        
+        # Step 1: Corporate Detection
+        corporate_category = 'P2P'  # Default
+        customer = str(df.iloc[row_idx]['Customer']).lower()
+        
+        # Check for G2G corporate patterns (simplified)
+        g2g_indicators = ['tcs', 'infosys', 'accenture', 'wipro', 'hcl', 'cognizant', 'capgemini', 'deloitte', 'microsoft', 'google', 'amazon']
+        for indicator in g2g_indicators:
+            if indicator in content_lower or indicator in customer:
+                corporate_category = 'G2G'
+                break
+        
+        # Step 2: Package Type Detection
+        package = '08HR 80KMS'  # Default
+        
+        # Check for drop/airport keywords
+        drop_keywords = ['drop', 'airport transfer', 'pickup from airport', 'drop to airport']
+        if any(keyword in content_lower for keyword in drop_keywords):
+            package = '04HR 40KMS'
+        
+        # Check for disposal/local keywords
+        disposal_keywords = ['at disposal', 'local use', 'visit', 'whole day use', 'use as per guest instructions']
+        if any(keyword in content_lower for keyword in disposal_keywords):
+            package = '08HR 80KMS'
+        
+        # Check for outstation
+        from_city = str(df.iloc[row_idx]['From (Service Location)']).lower()
+        to_city = str(df.iloc[row_idx]['To']).lower()
+        
+        if 'outstation' in content_lower or (from_city != to_city and from_city and to_city):
+            major_cities = ['mumbai', 'pune', 'hyderabad', 'chennai', 'delhi', 'ahmedabad', 'bangalore']
+            if any(city in to_city for city in major_cities):
+                package = 'Outstation 250KMS'
+            elif 'kolkata' in to_city or to_city not in major_cities:
+                package = 'Outstation 300KMS'
+        
+        # Step 3: Final Format
+        if corporate_category == 'G2G':
+            duty_type = f"G-{package}"
+        else:
+            duty_type = f"P-{package}"
+        
+        df.iloc[row_idx, df.columns.get_loc('Duty Type')] = duty_type
+        
+        return df
+    
     def _assign_dispatch_center(self, df: pd.DataFrame, row_idx: int) -> pd.DataFrame:
         """Assign dispatch center based on from location"""
         
@@ -627,7 +1072,7 @@ class BusinessLogicValidationAgent:
             return self._extract_remarks_fallback(original_content, df, row_idx)
     
     def _extract_remarks_with_ai(self, original_content: str, df: pd.DataFrame, row_idx: int) -> str:
-        """Extract remarks using AI with enhanced prompt"""
+        """Extract remarks using AI with comprehensive analysis prompt"""
         
         # Get current booking data
         current_booking = {
@@ -641,33 +1086,47 @@ class BusinessLogicValidationAgent:
             'flight': str(df.iloc[row_idx]['Flight/Train Number'])
         }
         
-        prompt = f"""You are a car rental booking validation agent. Extract ALL additional information from the original email/content that should go into the REMARKS column.
+        prompt = f"""You are an expert car rental booking validation agent. Your task is to analyze the entire email content and extract ALL additional information that should go in the REMARKS column.
 
-IMPORTANT REQUIREMENTS:
-1. Include driver name and contact if mentioned in the mail
-2. Include ALL extra information provided by the booker that doesn't fit into the structured fields
-3. NO INFORMATION should be omitted that is present in the mail
-4. Include special instructions, preferences, additional context
-5. Include multiple flight details and numbers if provided
-6. Include any emergency contacts, special requirements, or notes
+**ANALYSIS PROCESS - FOLLOW STEP BY STEP:**
 
-CURRENT BOOKING DATA (already extracted):
+1. **FIRST: READ AND UNDERSTAND THE ENTIRE CONTENT**
+   - Analyze the complete email/booking request
+   - Understand the context, relationships, and all mentioned details
+   - Identify what information is already captured in structured fields
+   - Identify what extra information remains uncaptured
+
+2. **EXTRACT UNCAPTURED INFORMATION:**
+   - Driver name and contact details (if mentioned)
+   - Special instructions or preferences from the booker
+   - Multiple flight details and numbers
+   - Emergency contacts or additional contact persons
+   - Special requirements (wheelchair access, child seat, etc.)
+   - Billing instructions or payment details
+   - Meeting points or specific pickup instructions
+   - Additional context, notes, or observations from the email
+   - Any other relevant information not in structured fields
+
+3. **CRITICAL REQUIREMENT:**
+   - ALL extra information provided by the booker which does not fit into the preexisting fields MUST be put into this field
+   - NO INFORMATION should be omitted that is present in the mail
+   - Do NOT include system-generated messages or processing information
+   - Focus ONLY on actual booking-related information from the original email
+
+**CURRENT STRUCTURED BOOKING DATA (already captured):**
 {current_booking}
 
-ORIGINAL EMAIL/CONTENT:
+**ORIGINAL EMAIL/CONTENT TO ANALYZE:**
 {original_content}
 
-Extract ONLY the additional information that is NOT already captured in the structured booking fields above. Focus on:
-- Driver names and contact numbers
-- Special instructions or preferences  
-- Additional flight/train details
-- Emergency contacts
-- Special requirements (wheelchair, child seat, etc.)
-- Billing or payment instructions
-- Additional context or notes
-- Any other information not in structured fields
+**INSTRUCTIONS:**
+- Analyze the entire content thoroughly
+- Extract ONLY the additional information NOT already in the structured fields above
+- Return clean, readable remarks text (no JSON, no formatting)
+- If no additional information exists, return empty string
+- Focus on information that would be useful for the driver or operations team
 
-Return only the remarks text (no JSON, no formatting). If no additional information, return empty string."""
+**OUTPUT:** Return only the remarks text containing uncaptured information from the email."""
         
         try:
             response = self.model.generate_content(
