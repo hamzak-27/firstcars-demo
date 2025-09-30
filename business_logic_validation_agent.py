@@ -108,6 +108,26 @@ class BusinessLogicValidationAgent:
         
         # Keep corporate patterns for backward compatibility
         self.corporate_patterns = self.corporate_mappings
+        
+        # Initialize duty type patterns (critical for rule-based fallback)
+        self.duty_type_patterns = {
+            'disposal': ['disposal', 'at disposal', 'local use', 'city use', 'whole day', 'full day', '8 hour', '8hr', '80km'],
+            'drop': ['drop', 'airport transfer', 'pickup', 'one way', 'transfer', '4 hour', '4hr', '40km'],
+            'outstation': ['outstation', 'out station', 'intercity', 'travel', 'round trip', '250km']
+        }
+        
+        # Dispatch center assignments based on cities  
+        self.dispatch_centers = {
+            'mumbai': 'Mumbai Central Dispatch',
+            'delhi': 'Delhi NCR Dispatch',
+            'bangalore': 'Bangalore Dispatch',
+            'pune': 'Pune Dispatch',
+            'hyderabad': 'Hyderabad Dispatch',
+            'chennai': 'Chennai Dispatch',
+            'kolkata': 'Kolkata Dispatch',
+            'gurgaon': 'Delhi NCR Dispatch',
+            'noida': 'Delhi NCR Dispatch'
+        }
     
     def _load_corporate_mappings(self) -> Dict[str, Dict[str, str]]:
         """Load corporate mappings from Corporate (1).csv"""
@@ -227,26 +247,6 @@ class BusinessLogicValidationAgent:
             'suv': 'Toyota Innova Crysta',
             'hatchback': 'Maruti Swift'
         }
-        
-        # Dispatch center assignments based on cities
-        self.dispatch_centers = {
-            'mumbai': 'Mumbai Central Dispatch',
-            'delhi': 'Delhi NCR Dispatch',
-            'bangalore': 'Bangalore Dispatch',
-            'pune': 'Pune Dispatch',
-            'hyderabad': 'Hyderabad Dispatch',
-            'chennai': 'Chennai Dispatch',
-            'kolkata': 'Kolkata Dispatch',
-            'gurgaon': 'Delhi NCR Dispatch',
-            'noida': 'Delhi NCR Dispatch'
-        }
-        
-        # Duty type detection patterns (from existing logic)
-        self.duty_type_patterns = {
-            'disposal': ['disposal', 'at disposal', 'local use', 'city use', 'whole day', 'full day', '8 hour', '8hr', '80km'],
-            'drop': ['drop', 'airport transfer', 'pickup', 'one way', 'transfer', '4 hour', '4hr', '40km'],
-            'outstation': ['outstation', 'out station', 'intercity', 'travel', 'round trip', '250km']
-        }
     
     def validate_and_enhance(self, extraction_result: ExtractionResult, 
                            classification_result: ClassificationResult,
@@ -317,14 +317,14 @@ class BusinessLogicValidationAgent:
                                    original_content: str) -> pd.DataFrame:
         """Validate and enhance a single booking row"""
         
-        # STEP 1: Comprehensive AI-powered validation (if available)
-        if self.model and original_content.strip():
-            try:
-                df = self._comprehensive_booking_validation(df, row_idx, original_content)
-                logger.info(f"Comprehensive AI validation completed for row {row_idx}")
-            except Exception as e:
-                logger.warning(f"Comprehensive AI validation failed for row {row_idx}: {e}")
-                # Continue with rule-based validation as fallback
+        # STEP 1: Use rule-based validation (AI disabled due to safety filter issues)
+        # Temporarily using rule-based comprehensive validation until Gemini safety filters are resolved
+        try:
+            df = self._rule_based_comprehensive_validation(df, row_idx, original_content)
+            logger.info(f"Rule-based comprehensive validation completed for row {row_idx}")
+        except Exception as e:
+            logger.warning(f"Rule-based comprehensive validation failed for row {row_idx}: {e}")
+            # Continue with individual validation methods
         
         # STEP 2: Rule-based validations (as fallback or enhancement)
         # 1. Validate and enhance duty type
