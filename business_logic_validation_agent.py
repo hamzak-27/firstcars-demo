@@ -369,6 +369,9 @@ class BusinessLogicValidationAgent:
         # 9. Validate and clean other fields
         df = self._validate_other_fields(df, row_idx)
         
+        # 10. Apply final post-processing rules (Corporate and Booked By to NA, address handling)
+        df = self._apply_final_post_processing(df, row_idx)
+        
         return df
     
     def _enhance_duty_type(self, df: pd.DataFrame, row_idx: int, original_content: str) -> pd.DataFrame:
@@ -594,6 +597,136 @@ class BusinessLogicValidationAgent:
         else:  # 53-59 minutes -> next hour (60)
             return 60
     
+    def _round_time_to_15_minutes(self, time_str: str) -> str:
+        """Round time string to nearest 15-minute interval"""
+        
+        if not time_str or time_str == "NA" or str(time_str).strip() == "":
+            return "NA"
+        
+        try:
+            # Parse time string (handle various formats)
+            time_str = str(time_str).strip()
+            
+            # Handle HH:MM format
+            if ':' in time_str:
+                parts = time_str.split(':')
+                if len(parts) >= 2:
+                    hour = int(parts[0])
+                    minute = int(parts[1])
+                else:
+                    return "NA"
+            # Handle HHMM format
+            elif len(time_str) in [3, 4] and time_str.isdigit():
+                if len(time_str) == 3:  # HMM format like 915
+                    hour = int(time_str[0])
+                    minute = int(time_str[1:3])
+                else:  # HHMM format like 0915
+                    hour = int(time_str[:2])
+                    minute = int(time_str[2:4])
+            else:
+                return "NA"
+            
+            # Validate hour and minute ranges
+            if not (0 <= hour <= 23 and 0 <= minute <= 59):
+                return "NA"
+            
+            # Round to nearest 15-minute interval
+            # 0-7 minutes → round down to 0
+            # 8-22 minutes → round to 15
+            # 23-37 minutes → round to 30 
+            # 38-52 minutes → round to 45
+            # 53-59 minutes → round up to next hour
+            if minute <= 7:
+                rounded_minute = 0
+            elif minute <= 22:
+                rounded_minute = 15
+            elif minute <= 37:
+                rounded_minute = 30
+            elif minute <= 52:
+                rounded_minute = 45
+            else:  # 53-59
+                rounded_minute = 0
+                hour = (hour + 1) % 24  # Handle 23:55 → 00:00
+            
+            # Format as HH:MM
+            return f"{hour:02d}:{rounded_minute:02d}"
+            
+        except (ValueError, IndexError) as e:
+            logger.warning(f"Failed to parse time '{time_str}': {e}")
+            return "NA"
+    
+    def _detect_and_handle_round_trips(self, df: pd.DataFrame, row_idx: int, original_content: str) -> pd.DataFrame:
+        """Detect round trips and set both From and To to the same starting city"""
+        
+        content_lower = original_content.lower()
+        from_location = str(df.iloc[row_idx]['From (Service Location)']).strip()
+        to_location = str(df.iloc[row_idx]['To']).strip()
+        
+        # Patterns that indicate round trips
+        round_trip_patterns = [
+            'round trip', 'return journey', 'return trip', 'back to', 
+            'return to', 'round journey', 'two way', 'return back'
+        ]
+        
+        # Check if any round trip pattern exists in content
+        is_round_trip = any(pattern in content_lower for pattern in round_trip_patterns)
+        
+        # Also check for patterns like "A to B to A" or "Chennai to Bangalore to Chennai"
+        if not is_round_trip and from_location and to_location:
+            # Extract city names
+            from_city = self._extract_city_name(from_location.lower())
+            to_city = self._extract_city_name(to_location.lower())
+            
+            # Look for patterns like "city1 to city2 to city1" in content
+            if from_city and to_city and from_city != to_city:
+                # Check if content mentions returning to the origin
+                pattern_variations = [
+                    f"{from_city} to {to_city} to {from_city}",
+                    f"{from_city} to {to_city} back to {from_city}",
+                    f"{from_city} to {to_city} return to {from_city}",
+                    f"{from_city}-{to_city}-{from_city}"
+                ]
+                
+                is_round_trip = any(pattern in content_lower for pattern in pattern_variations)
+        
+        # If round trip detected, set both columns to the starting city
+        if is_round_trip and from_location:
+            starting_city = self._extract_city_name(from_location.lower())
+            if starting_city:
+                # Set both From and To to the starting city
+                standardized_city = self.city_mappings.get(starting_city, starting_city.title())
+                df.iloc[row_idx, df.columns.get_loc('From (Service Location)')] = standardized_city
+                df.iloc[row_idx, df.columns.get_loc('To')] = standardized_city
+                
+                logger.info(f"Round trip detected for row {row_idx}: setting both From and To to {standardized_city}")
+        
+        return df
+    
+    def _apply_final_post_processing(self, df: pd.DataFrame, row_idx: int) -> pd.DataFrame:
+        """Apply final post-processing rules: Corporate/Booked By = NA, address handling"""
+        
+        # Set Corporate and Booked By columns to NA (always)
+        if 'Corporate' in df.columns:
+            df.iloc[row_idx, df.columns.get_loc('Corporate')] = 'NA'
+        if 'Booked By' in df.columns:
+            df.iloc[row_idx, df.columns.get_loc('Booked By')] = 'NA'
+        
+        # Set drop address handling (only reporting address)
+        if 'Drop Address' in df.columns:
+            reporting_addr = str(df.iloc[row_idx].get('Reporting Address', '')).strip()
+            if reporting_addr and reporting_addr != 'NA' and reporting_addr != 'nan':
+                # Only set drop address if explicitly different from reporting
+                # For now, leave empty as per requirements
+                df.iloc[row_idx, df.columns.get_loc('Drop Address')] = 'NA'
+        
+        # Apply 15-minute time rounding to current Rep. Time
+        current_time = str(df.iloc[row_idx]['Rep. Time']).strip()
+        if current_time and current_time != 'nan':
+            rounded_time = self._round_time_to_15_minutes(current_time)
+            df.iloc[row_idx, df.columns.get_loc('Rep. Time')] = rounded_time
+        
+        return df
+    
     def _standardize_city_names(self, df: pd.DataFrame, row_idx: int) -> pd.DataFrame:
         """Standardize city names in From/To columns"""
         
@@ -679,12 +812,14 @@ class BusinessLogicValidationAgent:
 
 **VALIDATION RULES:**
 
-1. **FROM AND TO COLUMNS:** Must always contain STANDARDIZED CITY NAMES ONLY
+1. **FROM AND TO COLUMNS - ROUND TRIP LOGIC:** Must always contain STANDARDIZED CITY NAMES ONLY
    - Extract city names from addresses/locations using the city mapping database
    - Remove street addresses, landmarks, building names
    - Example: "9B2, DABC Apartments, Nolambur, Chennai" → "Chennai"
    - Available cities include: {', '.join(city_sample)}... (and {len(self.city_mappings)-20} more)
    - Use exact city names as they appear in the database
+   - **ROUND TRIP DETECTION:** For round trips (like Chennai to Bangalore to Chennai), set BOTH From and To columns to the SAME starting city (e.g., "Chennai" for both From and To)
+   - Look for patterns like "A to B back to A", "return journey", "round trip", or itineraries showing return to origin
 
 2. **PASSENGER DETAILS:** Extract ALL available passenger information
    - If no passenger name mentioned → put "NA"
@@ -692,13 +827,23 @@ class BusinessLogicValidationAgent:
    - Clean phone numbers: remove +91, spaces, hyphens (keep 10 digits only)
    - If no details available → put "NA"
 
-3. **START AND END DATE:** Apply intelligent reasoning
+3. **REPORTING TIME - 15 MINUTE INTERVALS:** Apply strict 15-minute rounding
+   - Times MUST be rounded to 15-minute intervals: 04:00, 04:15, 04:30, 04:45, 05:00, etc.
+   - Rounding logic: 4:10 → 4:00; 4:25 → 4:15; 4:43 → 4:30; 4:55 → 4:45; 4:58 → 5:00
+   - Always return time in HH:MM format (24-hour)
+
+4. **ADDRESS HANDLING:**
+   - **Reporting Address:** Set this to the pickup/service location address
+   - **Drop Address:** Leave empty/NA unless explicitly different from reporting address
+   - Only set drop address if specifically mentioned as different location
+
+5. **START AND END DATE:** Apply intelligent reasoning
    - Parse relative dates: "tomorrow", "next Monday", "Saturday, October 04, 2025"
    - Convert to YYYY-MM-DD format
    - If only start date given, end date = start date (same day service)
    - Use context clues and current date for estimation
 
-4. **DUTY TYPE LOGIC - EXACT IMPLEMENTATION:**
+6. **DUTY TYPE LOGIC - EXACT IMPLEMENTATION:**
    **STEP 1: Corporate Detection & G2G/P2P Classification**
    - Identify corporate/company name from email content
    - Check against Corporate CSV database: {', '.join(corporate_sample)}... (and {len(self.corporate_mappings)-20} more)
@@ -809,6 +954,28 @@ Return ONLY the JSON object with corrected values."""
                         df.iloc[row_idx, df.columns.get_loc('Vehicle Group')] = validated_data['vehicle_group']
                     if 'duty_type' in validated_data:
                         df.iloc[row_idx, df.columns.get_loc('Duty Type')] = validated_data['duty_type']
+                    
+                    # Apply post-processing: time rounding
+                    if 'reporting_time' in validated_data:
+                        rounded_time = self._round_time_to_15_minutes(validated_data['reporting_time'])
+                        df.iloc[row_idx, df.columns.get_loc('Rep. Time')] = rounded_time
+                    
+                    # Apply post-processing: detect and handle round trips
+                    df = self._detect_and_handle_round_trips(df, row_idx, original_content)
+                    
+                    # Set Corporate and Booked By columns to NA (always)
+                    if 'Corporate' in df.columns:
+                        df.iloc[row_idx, df.columns.get_loc('Corporate')] = 'NA'
+                    if 'Booked By' in df.columns:
+                        df.iloc[row_idx, df.columns.get_loc('Booked By')] = 'NA'
+                    
+                    # Set drop address handling (only reporting address)
+                    if 'Drop Address' in df.columns:
+                        reporting_addr = str(df.iloc[row_idx].get('Reporting Address', '')).strip()
+                        if reporting_addr and reporting_addr != 'NA' and reporting_addr != 'nan':
+                            # Only set drop address if explicitly different from reporting
+                            # For now, leave empty as per requirements
+                            df.iloc[row_idx, df.columns.get_loc('Drop Address')] = 'NA'
                     
                     # Track cost
                     input_tokens = metadata['input_tokens']
