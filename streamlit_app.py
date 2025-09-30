@@ -678,15 +678,15 @@ def main():
             # Initialize classification agent
             try:
                 from booking_classification_agent import BookingClassificationAgent
-                # Check for Gemini API key
-                gemini_api_key = os.getenv('GEMINI_API_KEY') or os.getenv('GOOGLE_AI_API_KEY')
-                classifier = BookingClassificationAgent(gemini_api_key=gemini_api_key)
+                # Check for OpenAI API key
+                openai_api_key = os.getenv('OPENAI_API_KEY')
+                classifier = BookingClassificationAgent(openai_api_key=openai_api_key)
                 
                 # Show classification agent status
                 if classifier.ai_available:
-                    st.success("🤖 AI-powered classification enabled (Gemini)")
+                    st.success("🤖 AI-powered classification enabled (OpenAI GPT-4o-mini)")
                 else:
-                    st.warning("⚠️ Using fallback pattern matching (no Gemini API key found)")
+                    st.warning("⚠️ Using fallback pattern matching (no OpenAI API key found)")
                     
             except ImportError:
                 st.error("❌ Classification agent not available")

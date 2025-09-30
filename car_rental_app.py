@@ -111,29 +111,29 @@ def setup_api_key():
     
     if api_method == "Enter manually":
         api_key = st.sidebar.text_input(
-            "Enter your Gemini API Key:",
+            "Enter your OpenAI API Key:",
             type="password",
-            help="Get your API key from https://makersuite.google.com/app/apikey"
+            help="Get your API key from https://platform.openai.com/account/api-keys"
         )
         if api_key:
-            os.environ['GEMINI_API_KEY'] = api_key
+            os.environ['OPENAI_API_KEY'] = api_key
             st.sidebar.success("✅ API key configured!")
             st.session_state.api_key_configured = True
         else:
             st.sidebar.warning("⚠️ Please enter your API key")
             
     elif api_method == "Use environment variable":
-        api_key = os.getenv('GEMINI_API_KEY') or os.getenv('GOOGLE_AI_API_KEY')
+        api_key = os.getenv('OPENAI_API_KEY')
         if api_key:
             st.sidebar.success("✅ Found API key in environment")
             st.session_state.api_key_configured = True
         else:
             st.sidebar.error("❌ No API key found in environment variables")
-            st.sidebar.info("Set GEMINI_API_KEY or GOOGLE_AI_API_KEY environment variable")
+            st.sidebar.info("Set OPENAI_API_KEY environment variable")
     
     else:  # Test mode
         api_key = "test-key"
-        os.environ['GEMINI_API_KEY'] = api_key
+        os.environ['OPENAI_API_KEY'] = api_key
         st.sidebar.info("🧪 Test mode: Will use fallback extraction only")
         st.session_state.api_key_configured = True
     
@@ -143,7 +143,7 @@ def initialize_orchestrator(api_key: str):
     """Initialize the multi-agent orchestrator"""
     try:
         if api_key and api_key != "test-key":
-            st.info(f"🤖 Initializing AI agents with Gemini API: {api_key[:20]}...{api_key[-4:]}")
+            st.info(f"🤖 Initializing AI agents with OpenAI API: {api_key[:20]}...{api_key[-4:]}")
         else:
             st.warning("⚠️ Initializing in test mode - limited functionality")
             
@@ -154,7 +154,7 @@ def initialize_orchestrator(api_key: str):
         
         # Test the API connection
         if api_key and api_key != "test-key":
-            st.success("✅ AI agents initialized successfully with Gemini API!")
+            st.success("✅ AI agents initialized successfully with OpenAI API!")
         
         return orchestrator
     except Exception as e:
@@ -730,14 +730,14 @@ def main():
             **📊 Table Images (JPG/PNG):**
             1. 🔄 Multi-Booking Table Processor (for complex tables)
             2. 🔄 Enhanced Form Processor (fallback for single bookings) 
-            3. 🤖 Gemini AI processes extracted text through full pipeline
+            3. 🤖 OpenAI GPT-4o-mini processes extracted text through full pipeline
             
             **📄 Documents (PDF/DOCX):**
             1. 🔄 Document processors with AWS Textract OCR
-            2. 🤖 Gemini AI processes extracted text through full pipeline
+            2. 🤖 OpenAI GPT-4o-mini processes extracted text through full pipeline
             
             **📝 Text Files (TXT):**
-            1. 🤖 Direct Gemini AI processing through full pipeline
+            1. 🤖 Direct OpenAI GPT-4o-mini processing through full pipeline
             """)
         
         uploaded_file = st.file_uploader(
