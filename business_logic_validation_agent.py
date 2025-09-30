@@ -764,7 +764,8 @@ Return ONLY the JSON object with corrected values."""
                 messages=messages,
                 model=self.model_name,
                 temperature=0.1,
-                max_tokens=800
+                max_tokens=800,
+                force_json=True
             )
             
             # Parse JSON response
@@ -848,7 +849,8 @@ Return ONLY the JSON object with corrected values."""
                 messages=messages,
                 model=self.model_name,
                 temperature=0.1,  # Very low temperature for consistency
-                max_tokens=1000
+                max_tokens=1000,
+                force_json=True
             )
             
             # Parse JSON response
@@ -929,11 +931,13 @@ Provide clean data in JSON:
     def _apply_ai_validation_results(self, df: pd.DataFrame, row_idx: int, validation_result: Dict) -> pd.DataFrame:
         """Apply AI validation results to the DataFrame"""
         
-        if 'validated_data' not in validation_result:
-            logger.warning("No validated_data in AI response")
-            return df
-        
-        validated_data = validation_result['validated_data']
+        # Handle both nested and flat JSON responses
+        if 'validated_data' in validation_result:
+            validated_data = validation_result['validated_data']
+        else:
+            # Assume flat JSON response
+            validated_data = validation_result
+            logger.debug("Using flat JSON response for validation")
         
         # Apply validated fields if they exist and are not empty
         field_mappings = {

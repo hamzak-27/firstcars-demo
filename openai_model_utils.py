@@ -69,20 +69,29 @@ class OpenAIModelManager:
                          messages: List[Dict[str, str]], 
                          model: str = "gpt-4o-mini",
                          temperature: float = 0.1,
-                         max_tokens: int = 1000) -> Tuple[Optional[str], Dict[str, Any]]:
+                         max_tokens: int = 1000,
+                         force_json: bool = False) -> Tuple[Optional[str], Dict[str, Any]]:
         """Create a chat completion and return response with metadata"""
         
         if not self.configured or not self.client:
             raise ValueError("OpenAI client not configured")
         
         try:
-            response = self.client.chat.completions.create(
-                model=model,
-                messages=messages,
-                temperature=temperature,
-                max_tokens=max_tokens,
-                response_format={"type": "json_object"}  # Force JSON responses
-            )
+            # Check if messages contain 'json' for JSON mode
+            messages_text = ' '.join([msg.get('content', '') for msg in messages]).lower()
+            use_json_mode = force_json and 'json' in messages_text
+            
+            completion_params = {
+                "model": model,
+                "messages": messages,
+                "temperature": temperature,
+                "max_tokens": max_tokens
+            }
+            
+            if use_json_mode:
+                completion_params["response_format"] = {"type": "json_object"}
+            
+            response = self.client.chat.completions.create(**completion_params)
             
             # Extract response text
             response_text = response.choices[0].message.content
