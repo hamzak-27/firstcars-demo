@@ -14,6 +14,7 @@ from datetime import datetime, timedelta
 # Gemini AI imports
 try:
     import google.generativeai as genai
+    from gemini_model_utils import create_gemini_model
     GEMINI_AVAILABLE = True
 except ImportError:
     GEMINI_AVAILABLE = False
@@ -50,11 +51,14 @@ class BookingClassificationAgent:
             return
             
         try:
-            # Configure Gemini
-            genai.configure(api_key=self.gemini_api_key)
-            self.model = genai.GenerativeModel('gemini-1.5-flash')  # Fast and cost-effective model
-            self.ai_available = True
-            logger.info("Gemini AI classification initialized successfully")
+            # Configure Gemini with safer model creation
+            self.model, actual_model_name = create_gemini_model(self.gemini_api_key, 'models/gemini-2.5-flash')
+            if self.model:
+                self.ai_available = True
+                logger.info(f"Gemini AI classification initialized successfully with {actual_model_name}")
+            else:
+                logger.error(f"Failed to create Gemini model: {actual_model_name}")
+                self.ai_available = False
         except Exception as e:
             logger.error(f"Failed to initialize Gemini AI: {str(e)}")
             self.ai_available = False
@@ -81,6 +85,8 @@ BUSINESS RULES:
 3. Multiple passengers traveling together (unless explicitly stated to create separate bookings)
 4. Same car type for entire duration
 5. Continuous multi-day travel
+6. OUTSTATION ROUND TRIPS: Chennai→Bangalore→Chennai, Mumbai→Pune→Mumbai etc. (SINGLE booking)
+7. One passenger requesting one continuous journey (even if multi-city or multi-day)
 
 **MULTIPLE BOOKINGS:**
 1. Client wants two or more drops in the same day
@@ -105,7 +111,11 @@ ANALYZE AND RESPOND IN JSON FORMAT:
     "additional_info": "Any other relevant observations"
 }}
 
-IMPORTANT: Be very careful with structured content like "First car" and "Second car" or "arrange two cars" - these clearly indicate MULTIPLE bookings.
+IMPORTANT CLARIFICATIONS:
+1. Be very careful with structured content like "First car" and "Second car" or "arrange two cars" - these clearly indicate MULTIPLE bookings.
+2. OUTSTATION ROUND TRIPS are SINGLE bookings: "Chennai to Bangalore to Chennai" = ONE continuous journey
+3. Same passenger, same car type, continuous travel = SINGLE booking (even if multi-day or multi-city)
+4. Only create MULTIPLE bookings if explicitly mentioned separate cars/bookings or different passengers
 """
             
             # Call Gemini API

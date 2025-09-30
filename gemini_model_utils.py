@@ -106,7 +106,18 @@ class GeminiModelManager:
             if not self.configured:
                 genai.configure(api_key=self.api_key)
             
-            model = genai.GenerativeModel(model_name)
+            # Configure safety settings to bypass blocks
+            safety_settings = {
+                genai.types.HarmCategory.HARM_CATEGORY_HATE_SPEECH: genai.types.HarmBlockThreshold.BLOCK_NONE,
+                genai.types.HarmCategory.HARM_CATEGORY_HARASSMENT: genai.types.HarmBlockThreshold.BLOCK_NONE,
+                genai.types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: genai.types.HarmBlockThreshold.BLOCK_NONE,
+                genai.types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: genai.types.HarmBlockThreshold.BLOCK_NONE,
+            }
+            
+            model = genai.GenerativeModel(
+                model_name,
+                safety_settings=safety_settings
+            )
             return model, model_name
             
         except Exception as e:
@@ -118,7 +129,14 @@ class GeminiModelManager:
                 fallback_model = self.get_best_model()
                 if fallback_model and fallback_model != model_name:
                     try:
-                        model = genai.GenerativeModel(fallback_model)
+                        # Configure safety settings for fallback too
+                        safety_settings = {
+                            genai.types.HarmCategory.HARM_CATEGORY_HATE_SPEECH: genai.types.HarmBlockThreshold.BLOCK_NONE,
+                            genai.types.HarmCategory.HARM_CATEGORY_HARASSMENT: genai.types.HarmBlockThreshold.BLOCK_NONE,
+                            genai.types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: genai.types.HarmBlockThreshold.BLOCK_NONE,
+                            genai.types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: genai.types.HarmBlockThreshold.BLOCK_NONE,
+                        }
+                        model = genai.GenerativeModel(fallback_model, safety_settings=safety_settings)
                         logger.info(f"Successfully created fallback model: {fallback_model}")
                         return model, fallback_model
                     except Exception as fallback_error:
