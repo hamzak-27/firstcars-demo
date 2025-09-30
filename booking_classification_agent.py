@@ -118,8 +118,43 @@ IMPORTANT CLARIFICATIONS:
 4. Only create MULTIPLE bookings if explicitly mentioned separate cars/bookings or different passengers
 """
             
-            # Call Gemini API
-            response = self.model.generate_content(prompt)
+            # Call Gemini API with safer settings
+            response = self.model.generate_content(
+                prompt,
+                generation_config=genai.types.GenerationConfig(
+                    temperature=0.1,
+                    max_output_tokens=1000,
+                    top_p=0.8
+                ),
+                safety_settings=[
+                    {
+                        "category": "HARM_CATEGORY_HARASSMENT",
+                        "threshold": "BLOCK_NONE"
+                    },
+                    {
+                        "category": "HARM_CATEGORY_HATE_SPEECH", 
+                        "threshold": "BLOCK_NONE"
+                    },
+                    {
+                        "category": "HARM_CATEGORY_SEXUALLY_EXPLICIT",
+                        "threshold": "BLOCK_NONE"
+                    },
+                    {
+                        "category": "HARM_CATEGORY_DANGEROUS_CONTENT",
+                        "threshold": "BLOCK_NONE"
+                    }
+                ]
+            )
+            
+            # Check if response was blocked
+            if not response or not hasattr(response, 'text') or not response.text:
+                if hasattr(response, 'candidates') and response.candidates:
+                    if hasattr(response.candidates[0], 'finish_reason'):
+                        if response.candidates[0].finish_reason == 2:  # SAFETY
+                            logger.warning("Classification response blocked by safety filters")
+                            return self._classify_with_fallback(content)
+                raise Exception("Empty response from AI model")
+            
             response_text = response.text.strip()
             
             # Parse the JSON response
