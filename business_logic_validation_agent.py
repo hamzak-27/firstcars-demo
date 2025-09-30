@@ -813,12 +813,12 @@ Return ONLY the JSON object with corrected values."""
                     input_tokens = metadata['input_tokens']
                     output_tokens = metadata['output_tokens']
                     self._track_cost_with_tokens(input_tokens, output_tokens)
-                        
-                        logger.info(f"Comprehensive AI validation completed for row {row_idx}")
-                        
-                except json.JSONDecodeError as e:
-                    logger.warning(f"Failed to parse AI validation response: {e}")
-                    return self._rule_based_comprehensive_validation(df, row_idx, original_content)
+                    
+                    logger.info(f"Comprehensive AI validation completed for row {row_idx}")
+                    
+            except json.JSONDecodeError as e:
+                logger.warning(f"Failed to parse AI validation response: {e}")
+                return self._rule_based_comprehensive_validation(df, row_idx, original_content)
             
         except Exception as e:
             logger.error(f"AI comprehensive validation failed: {e}")
