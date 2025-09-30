@@ -85,7 +85,8 @@ class BaseExtractionAgent(ABC):
         # Configure OpenAI client
         if OPENAI_AVAILABLE and self.api_key and self.api_key != "test-key":
             try:
-                self.client = create_openai_client(self.api_key)
+                client_result, model_name = create_openai_client(self.api_key, self.model_name)
+                self.client = client_result
                 if self.client:
                     logger.info(f"Successfully configured OpenAI client with model: {self.model_name}")
                 else:
@@ -175,25 +176,20 @@ class BaseExtractionAgent(ABC):
         
         try:
             # Create messages
-            messages = create_chat_messages(prompt)
+            system_prompt = "You are a helpful assistant that extracts booking information from text and returns properly formatted JSON responses."
+            messages = create_chat_messages(system_prompt, prompt)
             
-            # Call OpenAI API
-            response = self.client.chat.completions.create(
-                model=self.model_name,
+            # Call OpenAI API using manager
+            output_text, metadata = self.client.create_completion(
                 messages=messages,
+                model=self.model_name,
                 temperature=0.1,
-                max_tokens=2000,
-                top_p=0.8
+                max_tokens=2000
             )
             
-            if not response or not response.choices or len(response.choices) == 0:
-                raise ValueError("Empty response from OpenAI")
-            
-            output_text = response.choices[0].message.content.strip()
-            
             # Calculate cost using actual token usage
-            input_tokens = response.usage.prompt_tokens
-            output_tokens = response.usage.completion_tokens
+            input_tokens = metadata['input_tokens']
+            output_tokens = metadata['output_tokens']
             cost = self._track_cost_with_tokens(input_tokens, output_tokens)
             
             return output_text, cost

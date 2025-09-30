@@ -68,7 +68,8 @@ class BusinessLogicValidationAgent:
         # Configure OpenAI if available
         if OPENAI_AVAILABLE and self.api_key and self.api_key != "test-key":
             try:
-                self.client = create_openai_client(self.api_key)
+                client_result, model_name = create_openai_client(self.api_key, self.model_name)
+                self.client = client_result
                 if self.client:
                     logger.info(f"Successfully configured OpenAI client with model: {self.model_name}")
                 else:
@@ -755,66 +756,63 @@ class BusinessLogicValidationAgent:
 Return ONLY the JSON object with corrected values."""
             
             # Create OpenAI messages
-            messages = create_chat_messages(validation_prompt)
+            system_prompt = "You are a business logic validation assistant that analyzes booking data and returns properly formatted JSON responses."
+            messages = create_chat_messages(system_prompt, validation_prompt)
             
-            # Call OpenAI API
-            response = self.client.chat.completions.create(
-                model=self.model_name,
+            # Call OpenAI API using manager
+            response_text, metadata = self.client.create_completion(
                 messages=messages,
+                model=self.model_name,
                 temperature=0.1,
-                max_tokens=800,
-                top_p=0.8
+                max_tokens=800
             )
             
-            if response and response.choices and len(response.choices) > 0:
-                response_text = response.choices[0].message.content.strip()
+            # Parse JSON response
+            try:
+                # Extract JSON from response
+                if '```json' in response_text:
+                    json_start = response_text.find('```json') + 7
+                    json_end = response_text.find('```', json_start)
+                    response_text = response_text[json_start:json_end].strip()
+                elif '```' in response_text:
+                    json_start = response_text.find('```') + 3
+                    json_end = response_text.rfind('```')
+                    response_text = response_text[json_start:json_end].strip()
                 
-                # Parse JSON response
-                try:
-                    # Extract JSON from response
-                    if '```json' in response_text:
-                        json_start = response_text.find('```json') + 7
-                        json_end = response_text.find('```', json_start)
-                        response_text = response_text[json_start:json_end].strip()
-                    elif '```' in response_text:
-                        json_start = response_text.find('```') + 3
-                        json_end = response_text.rfind('```')
-                        response_text = response_text[json_start:json_end].strip()
+                # Find JSON boundaries
+                start = response_text.find('{')
+                end = response_text.rfind('}') + 1
+                
+                if start >= 0 and end > start:
+                    json_text = response_text[start:end]
+                    validated_data = json.loads(json_text)
                     
-                    # Find JSON boundaries
-                    start = response_text.find('{')
-                    end = response_text.rfind('}') + 1
+                    # Update DataFrame with validated data
+                    if 'from_location' in validated_data:
+                        df.iloc[row_idx, df.columns.get_loc('From (Service Location)')] = validated_data['from_location']
+                    if 'to_location' in validated_data:
+                        df.iloc[row_idx, df.columns.get_loc('To')] = validated_data['to_location']
+                    if 'passenger_name' in validated_data:
+                        df.iloc[row_idx, df.columns.get_loc('Passenger Name')] = validated_data['passenger_name']
+                    if 'passenger_phone' in validated_data:
+                        df.iloc[row_idx, df.columns.get_loc('Passenger Phone Number')] = validated_data['passenger_phone']
+                    if 'passenger_email' in validated_data:
+                        df.iloc[row_idx, df.columns.get_loc('Passenger Email')] = validated_data['passenger_email']
+                    if 'start_date' in validated_data:
+                        df.iloc[row_idx, df.columns.get_loc('Start Date')] = validated_data['start_date']
+                    if 'end_date' in validated_data:
+                        df.iloc[row_idx, df.columns.get_loc('End Date')] = validated_data['end_date']
+                    if 'reporting_time' in validated_data:
+                        df.iloc[row_idx, df.columns.get_loc('Rep. Time')] = validated_data['reporting_time']
+                    if 'vehicle_group' in validated_data:
+                        df.iloc[row_idx, df.columns.get_loc('Vehicle Group')] = validated_data['vehicle_group']
+                    if 'duty_type' in validated_data:
+                        df.iloc[row_idx, df.columns.get_loc('Duty Type')] = validated_data['duty_type']
                     
-                    if start >= 0 and end > start:
-                        json_text = response_text[start:end]
-                        validated_data = json.loads(json_text)
-                        
-                        # Update DataFrame with validated data
-                        if 'from_location' in validated_data:
-                            df.iloc[row_idx, df.columns.get_loc('From (Service Location)')] = validated_data['from_location']
-                        if 'to_location' in validated_data:
-                            df.iloc[row_idx, df.columns.get_loc('To')] = validated_data['to_location']
-                        if 'passenger_name' in validated_data:
-                            df.iloc[row_idx, df.columns.get_loc('Passenger Name')] = validated_data['passenger_name']
-                        if 'passenger_phone' in validated_data:
-                            df.iloc[row_idx, df.columns.get_loc('Passenger Phone Number')] = validated_data['passenger_phone']
-                        if 'passenger_email' in validated_data:
-                            df.iloc[row_idx, df.columns.get_loc('Passenger Email')] = validated_data['passenger_email']
-                        if 'start_date' in validated_data:
-                            df.iloc[row_idx, df.columns.get_loc('Start Date')] = validated_data['start_date']
-                        if 'end_date' in validated_data:
-                            df.iloc[row_idx, df.columns.get_loc('End Date')] = validated_data['end_date']
-                        if 'reporting_time' in validated_data:
-                            df.iloc[row_idx, df.columns.get_loc('Rep. Time')] = validated_data['reporting_time']
-                        if 'vehicle_group' in validated_data:
-                            df.iloc[row_idx, df.columns.get_loc('Vehicle Group')] = validated_data['vehicle_group']
-                        if 'duty_type' in validated_data:
-                            df.iloc[row_idx, df.columns.get_loc('Duty Type')] = validated_data['duty_type']
-                        
-                        # Track cost
-                        input_tokens = response.usage.prompt_tokens
-                        output_tokens = response.usage.completion_tokens
-                        self._track_cost_with_tokens(input_tokens, output_tokens)
+                    # Track cost
+                    input_tokens = metadata['input_tokens']
+                    output_tokens = metadata['output_tokens']
+                    self._track_cost_with_tokens(input_tokens, output_tokens)
                         
                         logger.info(f"Comprehensive AI validation completed for row {row_idx}")
                         
@@ -842,22 +840,16 @@ Return ONLY the JSON object with corrected values."""
         
         try:
             # Create OpenAI messages
-            messages = create_chat_messages(safe_prompt)
+            system_prompt = "You are a business logic validation assistant that analyzes booking data and returns properly formatted JSON responses."
+            messages = create_chat_messages(system_prompt, safe_prompt)
             
-            # Call OpenAI API with conservative settings
-            response = self.client.chat.completions.create(
-                model=self.model_name,
+            # Call OpenAI API with conservative settings using manager
+            response_text, metadata = self.client.create_completion(
                 messages=messages,
+                model=self.model_name,
                 temperature=0.1,  # Very low temperature for consistency
-                max_tokens=1000,
-                top_p=0.8
+                max_tokens=1000
             )
-            
-            # Check if we got a valid response
-            if not response or not response.choices or len(response.choices) == 0:
-                raise Exception("Empty response from AI model")
-            
-            response_text = response.choices[0].message.content.strip()
             
             # Parse JSON response
             try:
@@ -877,8 +869,8 @@ Return ONLY the JSON object with corrected values."""
                 df = self._apply_ai_validation_results(df, row_idx, validation_result)
                 
                 # Track cost with token usage
-                input_tokens = response.usage.prompt_tokens
-                output_tokens = response.usage.completion_tokens
+                input_tokens = metadata['input_tokens']
+                output_tokens = metadata['output_tokens']
                 self._track_cost_with_tokens(input_tokens, output_tokens)
                 
                 logger.info(f"AI comprehensive validation completed successfully for row {row_idx}")
@@ -1257,28 +1249,23 @@ Return only additional details that would be useful for the driver or operations
         
         try:
             # Create OpenAI messages
-            messages = create_chat_messages(prompt)
+            system_prompt = "You are a helpful assistant that extracts additional booking information and returns concise, relevant details."
+            messages = create_chat_messages(system_prompt, prompt)
             
-            # Call OpenAI API
-            response = self.client.chat.completions.create(
-                model=self.model_name,
+            # Call OpenAI API using manager
+            response_text, metadata = self.client.create_completion(
                 messages=messages,
+                model=self.model_name,
                 temperature=0.1,
-                max_tokens=500,
-                top_p=0.8
+                max_tokens=500
             )
             
-            if response and response.choices and len(response.choices) > 0:
-                remarks = response.choices[0].message.content.strip()
-                
-                # Track cost with token usage
-                input_tokens = response.usage.prompt_tokens
-                output_tokens = response.usage.completion_tokens
-                self._track_cost_with_tokens(input_tokens, output_tokens)
-                
-                return remarks
-            else:
-                return ""
+            # Track cost with token usage
+            input_tokens = metadata['input_tokens']
+            output_tokens = metadata['output_tokens']
+            self._track_cost_with_tokens(input_tokens, output_tokens)
+            
+            return response_text.strip()
                 
         except Exception as e:
             logger.error(f"AI remarks extraction failed: {e}")
