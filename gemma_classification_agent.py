@@ -136,68 +136,29 @@ class GemmaClassificationAgent:
         return cost_inr
     
     def _build_classification_prompt(self, content: str) -> str:
-        """Build the classification prompt with business rules"""
-        return f"""You are an expert car rental booking classification agent. Analyze the content and determine if it requires SINGLE or MULTIPLE booking records.
+        """Build a simple classification prompt to avoid safety filters"""
+        return f"""Analyze this car booking request and determine if it needs 1 booking or multiple bookings.
 
-CRITICAL BUSINESS RULES:
+Key Rules:
+- Round trips (A to B to A) = 1 booking
+- "First car", "Second car", "two cars" = multiple bookings  
+- Same person, same trip = 1 booking
+- Different people or separate requests = multiple bookings
+- Table with multiple rows = multiple bookings
 
-🟢 SINGLE BOOKINGS:
-1. **Multi-day 8HR/80KM (8/80) continuous usage**: Client uses car for consecutive days under disposal package
-   - Example: "Need car for 3 days (Mon-Wed) for local disposal" = SINGLE booking
-   
-2. **Outstation multi-day trips**: Inter-city travel spanning multiple days
-   - Example: "Mumbai to Pune for 2 days, return on 3rd day" = SINGLE booking
-   
-3. **Single drop per day (4HR/40KM)**: One pickup and one drop location per day
-   - Example: "Drop from office to airport tomorrow" = SINGLE booking
+Content:
+{content[:600]}
 
-🔴 MULTIPLE BOOKINGS:
-1. **Multiple drops in same day**: Two or more drop locations in a single day
-   - Example: "Drop to Airport, then Hotel, then Office - all today" = MULTIPLE bookings (3 separate)
-   
-2. **8HR/80KM alternate days**: Disposal usage on non-consecutive days
-   - Example: "Need car on Monday, Wednesday, Friday for local use" = MULTIPLE bookings (3 separate)
-   
-3. **Vehicle type changes during multi-day**: Different vehicles for different days
-   - Example: "Dzire for Day 1-2, Innova for Day 3-4" = MULTIPLE bookings (2 separate)
-   
-4. **TABLE EXTRACTION with multiple bookings**: Table data showing multiple booking entries/columns
-   - Example: "TABLE EXTRACTION RESULTS (4 bookings found)" = MULTIPLE bookings
-   - Example: "Cab 1, Cab 2, Cab 3, Cab 4" column headers = MULTIPLE bookings (4 separate)
-   - Example: Multiple rows with different passenger names/dates = MULTIPLE bookings
-   
-5. **STRUCTURED DATA with multiple records**: Multiple booking records extracted from forms/tables
-   - Look for patterns like "Booking 1:", "Booking 2:", "Booking 3:" etc.
-   - Multiple different dates, names, or addresses in structured format
-
-DUTY TYPE DETECTION:
-- **4HR/40KM (4/40)**: "drop", "pickup and drop", "airport transfer", "point to point"
-- **8HR/80KM (8/80)**: "disposal", "at disposal", "local use", "within city", "8 hours"
-- **Outstation**: city names, "outstation", "inter-city", "Mumbai to Pune"
-
-CONTENT TO ANALYZE:
-{content}
-
-ANALYSIS REQUIRED:
-1. Detect duty type (4/40, 8/80, outstation)
-2. Identify all dates mentioned
-3. Count drop locations per day
-4. Check for vehicle type changes
-5. Apply business rules to determine single vs multiple
-
-Return ONLY this JSON format:
-
+Return JSON:
 {{
-    "analysis_steps": "Step-by-step reasoning following business rules",
-    "detected_duty_type": "4HR/40KM|8HR/80KM|outstation|unknown",
-    "detected_dates": ["2024-12-25", "2024-12-26"],
-    "detected_vehicles": ["Dzire", "Innova"],
-    "detected_drops": ["Airport", "Hotel", "Office"],
-    
-    "pattern_analysis": {{
-        "is_multi_day_continuous": true|false,
-        "is_alternate_days": true|false,
-        "has_vehicle_changes": true|false,
+    "booking_classification": {{
+        "booking_type": "single" or "multiple",
+        "booking_count": <number>,
+        "confidence_score": <0.0 to 1.0>
+    }},
+    "reasoning": "brief explanation",
+    "detected_duty_type": "drop|disposal|outstation|unknown"
+}}"""
         "has_multiple_drops_per_day": true|false
     }},
     

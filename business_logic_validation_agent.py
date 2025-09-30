@@ -9,6 +9,7 @@ import time
 import pandas as pd
 import re
 import os
+import json
 from typing import Dict, List, Optional, Any, Tuple
 from datetime import datetime, timedelta
 
@@ -108,6 +109,26 @@ class BusinessLogicValidationAgent:
         
         # Keep corporate patterns for backward compatibility
         self.corporate_patterns = self.corporate_mappings
+        
+        # Initialize duty type patterns (critical for rule-based fallback)
+        self.duty_type_patterns = {
+            'disposal': ['disposal', 'at disposal', 'local use', 'city use', 'whole day', 'full day', '8 hour', '8hr', '80km'],
+            'drop': ['drop', 'airport transfer', 'pickup', 'one way', 'transfer', '4 hour', '4hr', '40km'],
+            'outstation': ['outstation', 'out station', 'intercity', 'travel', 'round trip', '250km']
+        }
+        
+        # Dispatch center assignments based on cities  
+        self.dispatch_centers = {
+            'mumbai': 'Mumbai Central Dispatch',
+            'delhi': 'Delhi NCR Dispatch',
+            'bangalore': 'Bangalore Dispatch',
+            'pune': 'Pune Dispatch',
+            'hyderabad': 'Hyderabad Dispatch',
+            'chennai': 'Chennai Dispatch',
+            'kolkata': 'Kolkata Dispatch',
+            'gurgaon': 'Delhi NCR Dispatch',
+            'noida': 'Delhi NCR Dispatch'
+        }
     
     def _load_corporate_mappings(self) -> Dict[str, Dict[str, str]]:
         """Load corporate mappings from Corporate (1).csv"""
@@ -227,26 +248,6 @@ class BusinessLogicValidationAgent:
             'suv': 'Toyota Innova Crysta',
             'hatchback': 'Maruti Swift'
         }
-        
-        # Dispatch center assignments based on cities
-        self.dispatch_centers = {
-            'mumbai': 'Mumbai Central Dispatch',
-            'delhi': 'Delhi NCR Dispatch',
-            'bangalore': 'Bangalore Dispatch',
-            'pune': 'Pune Dispatch',
-            'hyderabad': 'Hyderabad Dispatch',
-            'chennai': 'Chennai Dispatch',
-            'kolkata': 'Kolkata Dispatch',
-            'gurgaon': 'Delhi NCR Dispatch',
-            'noida': 'Delhi NCR Dispatch'
-        }
-        
-        # Duty type detection patterns (from existing logic)
-        self.duty_type_patterns = {
-            'disposal': ['disposal', 'at disposal', 'local use', 'city use', 'whole day', 'full day', '8 hour', '8hr', '80km'],
-            'drop': ['drop', 'airport transfer', 'pickup', 'one way', 'transfer', '4 hour', '4hr', '40km'],
-            'outstation': ['outstation', 'out station', 'intercity', 'travel', 'round trip', '250km']
-        }
     
     def validate_and_enhance(self, extraction_result: ExtractionResult, 
                            classification_result: ClassificationResult,
@@ -317,14 +318,27 @@ class BusinessLogicValidationAgent:
                                    original_content: str) -> pd.DataFrame:
         """Validate and enhance a single booking row"""
         
-        # STEP 1: Comprehensive AI-powered validation (if available)
-        if self.model and original_content.strip():
+        # STEP 1: Try AI-based comprehensive validation first (with safer error handling)
+        if self.model:
             try:
-                df = self._comprehensive_booking_validation(df, row_idx, original_content)
-                logger.info(f"Comprehensive AI validation completed for row {row_idx}")
+                df = self._ai_comprehensive_validation_safe(df, row_idx, original_content)
+                logger.info(f"AI comprehensive validation completed successfully for row {row_idx}")
             except Exception as e:
-                logger.warning(f"Comprehensive AI validation failed for row {row_idx}: {e}")
-                # Continue with rule-based validation as fallback
+                logger.warning(f"AI comprehensive validation failed for row {row_idx}: {e}, falling back to rule-based")
+                # Fallback to rule-based validation
+                try:
+                    df = self._rule_based_comprehensive_validation(df, row_idx, original_content)
+                    logger.info(f"Rule-based comprehensive validation completed for row {row_idx}")
+                except Exception as e2:
+                    logger.warning(f"Rule-based comprehensive validation also failed for row {row_idx}: {e2}")
+        else:
+            # No AI model available, use rule-based
+            try:
+                df = self._rule_based_comprehensive_validation(df, row_idx, original_content)
+                logger.info(f"Rule-based comprehensive validation completed for row {row_idx}")
+            except Exception as e:
+                logger.warning(f"Rule-based comprehensive validation failed for row {row_idx}: {e}")
+                # Continue with individual validation methods
         
         # STEP 2: Rule-based validations (as fallback or enhancement)
         # 1. Validate and enhance duty type
@@ -747,7 +761,13 @@ Return ONLY the JSON object with corrected values."""
                     temperature=0.1,
                     max_output_tokens=800,
                     top_p=0.8
-                )
+                ),
+                safety_settings={
+                    genai.types.HarmCategory.HARM_CATEGORY_HARASSMENT: genai.types.HarmBlockThreshold.BLOCK_NONE,
+                    genai.types.HarmCategory.HARM_CATEGORY_HATE_SPEECH: genai.types.HarmBlockThreshold.BLOCK_NONE,
+                    genai.types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: genai.types.HarmBlockThreshold.BLOCK_NONE,
+                    genai.types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: genai.types.HarmBlockThreshold.BLOCK_NONE,
+                }
             )
             
             if response and hasattr(response, 'text') and response.text:
@@ -807,6 +827,161 @@ Return ONLY the JSON object with corrected values."""
         except Exception as e:
             logger.error(f"AI comprehensive validation failed: {e}")
             return self._rule_based_comprehensive_validation(df, row_idx, original_content)
+        
+        return df
+    
+    def _ai_comprehensive_validation_safe(self, df: pd.DataFrame, row_idx: int, original_content: str) -> pd.DataFrame:
+        """Safer AI-powered comprehensive validation with error handling for safety filters"""
+        
+        if not self.model:
+            raise Exception("No AI model available")
+        
+        # Get current booking data for context
+        current_booking = self._extract_current_booking_data(df, row_idx)
+        
+        # Create a safer, more business-focused prompt to avoid safety filter triggers
+        safe_prompt = self._create_safe_business_validation_prompt(original_content, current_booking)
+        
+        try:
+            # Use more conservative generation settings
+            response = self.model.generate_content(
+                safe_prompt,
+                generation_config=genai.types.GenerationConfig(
+                    temperature=0.1,  # Very low temperature for consistency
+                    max_output_tokens=1000,
+                    top_p=0.8,
+                    candidate_count=1
+                ),
+                safety_settings={
+                    genai.types.HarmCategory.HARM_CATEGORY_HARASSMENT: genai.types.HarmBlockThreshold.BLOCK_NONE,
+                    genai.types.HarmCategory.HARM_CATEGORY_HATE_SPEECH: genai.types.HarmBlockThreshold.BLOCK_NONE,
+                    genai.types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: genai.types.HarmBlockThreshold.BLOCK_NONE,
+                    genai.types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: genai.types.HarmBlockThreshold.BLOCK_NONE,
+                }
+            )
+            
+            # Check if response was blocked by safety filters
+            if hasattr(response, 'prompt_feedback') and response.prompt_feedback:
+                if hasattr(response.prompt_feedback, 'block_reason'):
+                    logger.warning(f"AI response blocked by safety filters: {response.prompt_feedback.block_reason}")
+                    raise Exception(f"Safety filter blocked response: {response.prompt_feedback.block_reason}")
+            
+            # Check if we got a valid response
+            if not response or not hasattr(response, 'text') or not response.text:
+                if hasattr(response, 'candidates') and response.candidates:
+                    if hasattr(response.candidates[0], 'finish_reason'):
+                        logger.warning(f"AI generation stopped with reason: {response.candidates[0].finish_reason}")
+                        if response.candidates[0].finish_reason == 2:  # SAFETY
+                            raise Exception("Response blocked by safety filters (finish_reason=2)")
+                raise Exception("Empty response from AI model")
+            
+            response_text = response.text.strip()
+            
+            # Parse JSON response
+            try:
+                # Extract JSON if wrapped in markdown
+                if '```json' in response_text:
+                    json_start = response_text.find('```json') + 7
+                    json_end = response_text.find('```', json_start)
+                    response_text = response_text[json_start:json_end].strip()
+                elif '```' in response_text:
+                    json_start = response_text.find('```') + 3
+                    json_end = response_text.rfind('```')
+                    response_text = response_text[json_start:json_end].strip()
+                
+                validation_result = json.loads(response_text)
+                
+                # Apply AI validation results to DataFrame
+                df = self._apply_ai_validation_results(df, row_idx, validation_result)
+                
+                # Track cost
+                self._track_cost(safe_prompt, response_text)
+                
+                logger.info(f"AI comprehensive validation completed successfully for row {row_idx}")
+                return df
+                
+            except json.JSONDecodeError as e:
+                logger.warning(f"Failed to parse AI validation response as JSON: {e}")
+                logger.debug(f"Raw AI response: {response_text[:200]}...")
+                raise Exception(f"Invalid JSON response from AI: {e}")
+            
+        except Exception as e:
+            # Log the specific error and re-raise
+            logger.error(f"AI comprehensive validation failed: {str(e)}")
+            raise e
+    
+    def _create_safe_business_validation_prompt(self, original_content: str, current_booking: Dict) -> str:
+        """Create a business-focused prompt that avoids safety filter triggers"""
+        
+        prompt = f"""Extract and validate booking details from this content.
+
+Current data: {json.dumps(current_booking, indent=2)}
+
+Original content: {original_content[:800]}
+
+Provide clean data in JSON:
+{{
+    "from_city": "city name",
+    "to_city": "city name", 
+    "passenger_name": "name or NA",
+    "passenger_phone": "10 digits or NA",
+    "passenger_email": "email or NA",
+    "start_date": "YYYY-MM-DD",
+    "end_date": "YYYY-MM-DD",
+    "duty_type": "service type",
+    "remarks": "additional notes"
+}}"""
+        
+        return prompt
+    
+    def _extract_current_booking_data(self, df: pd.DataFrame, row_idx: int) -> Dict:
+        """Extract current booking data for AI context"""
+        
+        return {
+            "passenger_name": str(df.iloc[row_idx].get('Passenger Name', 'NA')),
+            "passenger_phone": str(df.iloc[row_idx].get('Passenger Phone Number', 'NA')), 
+            "passenger_email": str(df.iloc[row_idx].get('Passenger Email', 'NA')),
+            "from_location": str(df.iloc[row_idx].get('From (Service Location)', '')),
+            "to_location": str(df.iloc[row_idx].get('To', '')),
+            "start_date": str(df.iloc[row_idx].get('Start Date', '')),
+            "end_date": str(df.iloc[row_idx].get('End Date', '')),
+            "vehicle_group": str(df.iloc[row_idx].get('Vehicle Group', '')),
+            "duty_type": str(df.iloc[row_idx].get('Duty Type', '')),
+            "remarks": str(df.iloc[row_idx].get('Remarks', ''))
+        }
+    
+    def _apply_ai_validation_results(self, df: pd.DataFrame, row_idx: int, validation_result: Dict) -> pd.DataFrame:
+        """Apply AI validation results to the DataFrame"""
+        
+        if 'validated_data' not in validation_result:
+            logger.warning("No validated_data in AI response")
+            return df
+        
+        validated_data = validation_result['validated_data']
+        
+        # Apply validated fields if they exist and are not empty
+        field_mappings = {
+            'from_city': 'From (Service Location)',
+            'to_city': 'To',
+            'passenger_name': 'Passenger Name', 
+            'passenger_phone': 'Passenger Phone Number',
+            'passenger_email': 'Passenger Email',
+            'start_date': 'Start Date',
+            'end_date': 'End Date', 
+            'duty_type': 'Duty Type',
+            'remarks': 'Remarks',
+            'enhanced_remarks': 'Remarks'  # Backward compatibility
+        }
+        
+        for ai_field, df_column in field_mappings.items():
+            if ai_field in validated_data and validated_data[ai_field]:
+                value = str(validated_data[ai_field]).strip()
+                if value and value.lower() not in ['none', 'null', 'nan', '']:
+                    try:
+                        df.iloc[row_idx, df.columns.get_loc(df_column)] = value
+                        logger.debug(f"Updated {df_column} with AI validation: {value}")
+                    except KeyError:
+                        logger.warning(f"Column {df_column} not found in DataFrame")
         
         return df
     
@@ -1086,47 +1261,15 @@ Return ONLY the JSON object with corrected values."""
             'flight': str(df.iloc[row_idx]['Flight/Train Number'])
         }
         
-        prompt = f"""You are an expert car rental booking validation agent. Your task is to analyze the entire email content and extract ALL additional information that should go in the REMARKS column.
+        prompt = f"""Extract additional booking notes from this email that aren't in the structured data.
 
-**ANALYSIS PROCESS - FOLLOW STEP BY STEP:**
-
-1. **FIRST: READ AND UNDERSTAND THE ENTIRE CONTENT**
-   - Analyze the complete email/booking request
-   - Understand the context, relationships, and all mentioned details
-   - Identify what information is already captured in structured fields
-   - Identify what extra information remains uncaptured
-
-2. **EXTRACT UNCAPTURED INFORMATION:**
-   - Driver name and contact details (if mentioned)
-   - Special instructions or preferences from the booker
-   - Multiple flight details and numbers
-   - Emergency contacts or additional contact persons
-   - Special requirements (wheelchair access, child seat, etc.)
-   - Billing instructions or payment details
-   - Meeting points or specific pickup instructions
-   - Additional context, notes, or observations from the email
-   - Any other relevant information not in structured fields
-
-3. **CRITICAL REQUIREMENT:**
-   - ALL extra information provided by the booker which does not fit into the preexisting fields MUST be put into this field
-   - NO INFORMATION should be omitted that is present in the mail
-   - Do NOT include system-generated messages or processing information
-   - Focus ONLY on actual booking-related information from the original email
-
-**CURRENT STRUCTURED BOOKING DATA (already captured):**
+Structured data already captured:
 {current_booking}
 
-**ORIGINAL EMAIL/CONTENT TO ANALYZE:**
-{original_content}
+Original email:
+{original_content[:600]}
 
-**INSTRUCTIONS:**
-- Analyze the entire content thoroughly
-- Extract ONLY the additional information NOT already in the structured fields above
-- Return clean, readable remarks text (no JSON, no formatting)
-- If no additional information exists, return empty string
-- Focus on information that would be useful for the driver or operations team
-
-**OUTPUT:** Return only the remarks text containing uncaptured information from the email."""
+Return only additional details that would be useful for the driver or operations team. If no additional details, return empty string."""
         
         try:
             response = self.model.generate_content(
@@ -1135,7 +1278,13 @@ Return ONLY the JSON object with corrected values."""
                     temperature=0.1,
                     max_output_tokens=500,
                     top_p=0.8
-                )
+                ),
+                safety_settings={
+                    genai.types.HarmCategory.HARM_CATEGORY_HARASSMENT: genai.types.HarmBlockThreshold.BLOCK_NONE,
+                    genai.types.HarmCategory.HARM_CATEGORY_HATE_SPEECH: genai.types.HarmBlockThreshold.BLOCK_NONE,
+                    genai.types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: genai.types.HarmBlockThreshold.BLOCK_NONE,
+                    genai.types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: genai.types.HarmBlockThreshold.BLOCK_NONE,
+                }
             )
             
             if response and hasattr(response, 'text') and response.text:

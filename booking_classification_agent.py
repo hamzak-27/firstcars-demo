@@ -73,53 +73,52 @@ class BookingClassificationAgent:
     def _classify_with_ai(self, content: str) -> ClassificationResult:
         """AI-powered classification using Gemini with your business rules"""
         try:
-            # Create the classification prompt with your specific business rules
+            # Create a simple, neutral classification prompt
             prompt = f"""
-You are an expert car rental booking classifier. Analyze the following email/text content and determine if it requires SINGLE or MULTIPLE booking records.
+Analyze this car booking request and determine if it needs 1 booking or multiple bookings.
 
-BUSINESS RULES:
+Key Rules:
+- Round trips (A to B to A) = 1 booking
+- "First car", "Second car", "two cars" = multiple bookings  
+- Same person, same trip = 1 booking
+- Different people or separate requests = multiple bookings
 
-**SINGLE BOOKINGS:**
-1. Client using a car for many days under 8/80 or outstation package (consecutive days)
-2. Client only wants one drop (4/40) in a day
-3. Multiple passengers traveling together (unless explicitly stated to create separate bookings)
-4. Same car type for entire duration
-5. Continuous multi-day travel
-6. OUTSTATION ROUND TRIPS: Chennai→Bangalore→Chennai, Mumbai→Pune→Mumbai etc. (SINGLE booking)
-7. One passenger requesting one continuous journey (even if multi-city or multi-day)
+Content:
+{content[:800]}
 
-**MULTIPLE BOOKINGS:**
-1. Client wants two or more drops in the same day
-2. Client wants 8/80 but for alternate/non-consecutive days (one day, then skip a day, then another day, etc.)
-3. Client wants 8/80 for a few days but car type is changing for different days
-4. Explicitly mentioned separate bookings ("First car", "Second car", "arrange two cars", etc.)
-5. Different passengers with different requirements
-6. Table format with multiple rows of booking data
-
-CONTENT TO ANALYZE:
-{content}
-
-ANALYZE AND RESPOND IN JSON FORMAT:
+Respond in JSON:
 {{
-    "predicted_booking_count": <number>,
-    "booking_type": "single" or "multiple",
-    "confidence_score": <0.0 to 1.0>,
-    "reasoning": "Detailed explanation of your decision based on business rules",
-    "detected_patterns": ["list of patterns you found"],
-    "duty_type_indicators": ["8/80", "4/40", "outstation", etc.],
-    "date_patterns": ["dates or date ranges found"],
-    "additional_info": "Any other relevant observations"
-}}
-
-IMPORTANT CLARIFICATIONS:
-1. Be very careful with structured content like "First car" and "Second car" or "arrange two cars" - these clearly indicate MULTIPLE bookings.
-2. OUTSTATION ROUND TRIPS are SINGLE bookings: "Chennai to Bangalore to Chennai" = ONE continuous journey
-3. Same passenger, same car type, continuous travel = SINGLE booking (even if multi-day or multi-city)
-4. Only create MULTIPLE bookings if explicitly mentioned separate cars/bookings or different passengers
-"""
+    "booking_count": <number>,
+    "type": "single" or "multiple",
+    "confidence": <0.0 to 1.0>,
+    "reason": "Brief explanation"
+}}"""
             
-            # Call Gemini API
-            response = self.model.generate_content(prompt)
+            # Call Gemini API with safer settings
+            response = self.model.generate_content(
+                prompt,
+                generation_config=genai.types.GenerationConfig(
+                    temperature=0.1,
+                    max_output_tokens=1000,
+                    top_p=0.8
+                ),
+                safety_settings={
+                    genai.types.HarmCategory.HARM_CATEGORY_HARASSMENT: genai.types.HarmBlockThreshold.BLOCK_NONE,
+                    genai.types.HarmCategory.HARM_CATEGORY_HATE_SPEECH: genai.types.HarmBlockThreshold.BLOCK_NONE,
+                    genai.types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: genai.types.HarmBlockThreshold.BLOCK_NONE,
+                    genai.types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: genai.types.HarmBlockThreshold.BLOCK_NONE,
+                }
+            )
+            
+            # Check if response was blocked
+            if not response or not hasattr(response, 'text') or not response.text:
+                if hasattr(response, 'candidates') and response.candidates:
+                    if hasattr(response.candidates[0], 'finish_reason'):
+                        if response.candidates[0].finish_reason == 2:  # SAFETY
+                            logger.warning("Classification response blocked by safety filters")
+                            return self._classify_with_fallback(content)
+                raise Exception("Empty response from AI model")
+            
             response_text = response.text.strip()
             
             # Parse the JSON response
@@ -137,14 +136,14 @@ IMPORTANT CLARIFICATIONS:
                 result_data = json.loads(response_text)
                 
                 return ClassificationResult(
-                    predicted_booking_count=result_data.get('predicted_booking_count', 1),
-                    booking_type=result_data.get('booking_type', 'single'),
-                    confidence_score=result_data.get('confidence_score', 0.8),
-                    reasoning=result_data.get('reasoning', 'AI classification completed'),
+                    predicted_booking_count=result_data.get('booking_count', result_data.get('predicted_booking_count', 1)),
+                    booking_type=result_data.get('type', result_data.get('booking_type', 'single')),
+                    confidence_score=result_data.get('confidence', result_data.get('confidence_score', 0.8)),
+                    reasoning=result_data.get('reason', result_data.get('reasoning', 'AI classification completed')),
                     detected_patterns=result_data.get('detected_patterns', []),
                     duty_type_indicators=result_data.get('duty_type_indicators', []),
                     date_patterns=result_data.get('date_patterns', []),
-                    additional_info=result_data.get('additional_info', 'AI-powered analysis')
+                    additional_info=result_data.get('additional_info', 'Simple AI analysis')
                 )
                 
             except json.JSONDecodeError as e:
