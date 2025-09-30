@@ -11,7 +11,7 @@ from typing import Dict, List, Optional, Any
 from base_extraction_agent import ExtractionResult
 from single_booking_extraction_agent import SingleBookingExtractionAgent
 from multiple_booking_extraction_agent import MultipleBookingExtractionAgent
-from gemma_classification_agent import ClassificationResult, BookingType
+from openai_classification_agent import ClassificationResult, BookingType
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +47,7 @@ class ExtractionRouter:
             # Fallback to enhanced processor if agent fails
             try:
                 from enhanced_multi_booking_processor import EnhancedMultiBookingProcessor
-                self.multiple_agent = EnhancedMultiBookingProcessor(gemini_api_key=api_key)
+                self.multiple_agent = EnhancedMultiBookingProcessor(openai_api_key=api_key)
                 logger.info("✅ Enhanced multi-booking processor initialized (Textract fallback)")
             except Exception as e2:
                 logger.error(f"❌ Failed to initialize any multiple booking processor: {str(e2)}")

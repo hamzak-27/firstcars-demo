@@ -9,7 +9,7 @@ import time
 from typing import Dict, List, Optional, Any
 
 from base_extraction_agent import BaseExtractionAgent, BookingData, ExtractionResult
-from gemma_classification_agent import ClassificationResult
+from openai_classification_agent import ClassificationResult
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +24,7 @@ class SingleBookingExtractionAgent(BaseExtractionAgent):
     - Fast processing
     """
     
-    def __init__(self, api_key: str = None, model_name: str = "models/gemini-2.5-flash"):
+    def __init__(self, api_key: str = None, model_name: str = "gpt-4o-mini"):
         """Initialize single booking extraction agent"""
         super().__init__(api_key, model_name)
         logger.info("SingleBookingExtractionAgent initialized")
@@ -44,9 +44,9 @@ class SingleBookingExtractionAgent(BaseExtractionAgent):
         logger.info(f"Starting single booking extraction ({len(content)} chars)")
         
         try:
-            # Use Gemma API if available, otherwise fallback
-            if self.model:
-                return self._extract_with_gemma(content, classification_result, start_time)
+            # Use OpenAI API if available, otherwise fallback
+            if self.client:
+                return self._extract_with_openai(content, classification_result, start_time)
             else:
                 return self._extract_with_fallback(content, classification_result, start_time)
                 
@@ -65,15 +65,15 @@ class SingleBookingExtractionAgent(BaseExtractionAgent):
                 error_message=str(e)
             )
     
-    def _extract_with_gemma(self, content: str, classification_result: ClassificationResult, start_time: float) -> ExtractionResult:
-        """Extract using Gemma API"""
+    def _extract_with_openai(self, content: str, classification_result: ClassificationResult, start_time: float) -> ExtractionResult:
+        """Extract using OpenAI API"""
         
         try:
             # Build extraction prompt
             prompt = self._build_extraction_prompt(content, classification_result)
             
             # Generate response
-            response_text, cost = self._generate_gemma_response(prompt)
+            response_text, cost = self._generate_openai_response(prompt)
             
             # Parse response
             parsed_data = self._parse_json_response(response_text)
@@ -81,7 +81,7 @@ class SingleBookingExtractionAgent(BaseExtractionAgent):
             # Create booking data
             booking_dict = parsed_data.get('booking', {})
             booking = self._create_booking_from_dict(booking_dict)
-            booking.extraction_method = "single_booking_gemma"
+            booking.extraction_method = "single_booking_openai"
             
             # Create DataFrame
             df = self._create_dataframe_from_bookings([booking])
@@ -97,16 +97,16 @@ class SingleBookingExtractionAgent(BaseExtractionAgent):
                 confidence_score=parsed_data.get('confidence_score', 0.8),
                 processing_time=processing_time,
                 cost_inr=cost,
-                extraction_method="single_booking_gemma",
+                extraction_method="single_booking_openai",
                 metadata={
                     'classification_confidence': classification_result.confidence_score,
                     'detected_duty_type': classification_result.detected_duty_type.value,
-                    'gemma_response_length': len(response_text)
+                    'openai_response_length': len(response_text)
                 }
             )
             
         except Exception as e:
-            logger.error(f"Gemma extraction failed: {str(e)}")
+            logger.error(f"OpenAI extraction failed: {str(e)}")
             # Fallback to rule-based extraction
             return self._extract_with_fallback(content, classification_result, start_time, error=str(e))
     

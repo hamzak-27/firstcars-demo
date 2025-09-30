@@ -61,50 +61,49 @@ class ExtractionResult:
     metadata: Dict[str, Any] = None
 
 try:
-    import google.generativeai as genai
-    from gemini_model_utils import create_gemini_model, get_model_manager
-    GEMMA_AVAILABLE = True
+    from openai_model_utils import create_openai_client, create_chat_messages
+    OPENAI_AVAILABLE = True
 except ImportError:
-    GEMMA_AVAILABLE = False
-    logger.warning("Google Generative AI not available. Install with: pip install google-generativeai")
+    OPENAI_AVAILABLE = False
+    logger.warning("OpenAI utilities not available. Install with: pip install openai")
 
 class BaseExtractionAgent(ABC):
     """
     Base class for booking extraction agents
-    Provides shared functionality for Gemma API integration and DataFrame operations
+    Provides shared functionality for OpenAI API integration and DataFrame operations
     """
     
-    def __init__(self, api_key: str = None, model_name: str = "models/gemini-2.5-flash"):
+    def __init__(self, api_key: str = None, model_name: str = "gpt-4o-mini"):
         """Initialize base extraction agent"""
         
-        if not GEMMA_AVAILABLE:
-            logger.warning("Gemma not available, will use fallback extraction")
+        if not OPENAI_AVAILABLE:
+            logger.warning("OpenAI not available, will use fallback extraction")
         
-        self.api_key = api_key or os.getenv('GEMINI_API_KEY') or os.getenv('GOOGLE_AI_API_KEY')
+        self.api_key = api_key or os.getenv('OPENAI_API_KEY')
         self.model_name = model_name
         
-        # Configure Gemini using the model manager
-        if GEMMA_AVAILABLE and self.api_key and self.api_key != "test-key":
+        # Configure OpenAI client
+        if OPENAI_AVAILABLE and self.api_key and self.api_key != "test-key":
             try:
-                self.model, actual_model_name = create_gemini_model(self.api_key, model_name)
-                if self.model:
-                    self.model_name = actual_model_name
-                    logger.info(f"Successfully configured Gemini model: {actual_model_name}")
+                self.client = create_openai_client(self.api_key)
+                if self.client:
+                    logger.info(f"Successfully configured OpenAI client with model: {self.model_name}")
                 else:
-                    logger.error(f"Failed to create any Gemini model: {actual_model_name}")
+                    logger.error(f"Failed to create OpenAI client")
+                    self.client = None
             except Exception as e:
-                logger.error(f"Error creating Gemini model: {e}")
-                self.model = None
+                logger.error(f"Error creating OpenAI client: {e}")
+                self.client = None
         else:
-            self.model = None
+            self.client = None
             if not self.api_key:
-                logger.info("No Gemini API key found - will use fallback extraction")
+                logger.info("No OpenAI API key found - will use fallback extraction")
             else:
                 logger.info("Test mode - will use fallback extraction")
         
-        # Cost tracking (approximate rates in INR)
-        self.cost_per_1k_input_tokens = 0.05
-        self.cost_per_1k_output_tokens = 0.15
+        # Cost tracking (OpenAI GPT-4o-mini rates in INR)
+        self.cost_per_1k_input_tokens = 0.0125  # ₹0.0125 per 1K input tokens
+        self.cost_per_1k_output_tokens = 0.05   # ₹0.05 per 1K output tokens
         self.total_cost = 0.0
         self.request_count = 0
         
@@ -139,7 +138,7 @@ class BaseExtractionAgent(ABC):
         return len(text) // 4
     
     def _track_cost(self, input_text: str, output_text: str) -> float:
-        """Track and return API usage cost in INR"""
+        """Track and return API usage cost in INR (fallback method)"""
         input_tokens = self._estimate_tokens(input_text)
         output_tokens = self._estimate_tokens(output_text)
         
@@ -154,32 +153,57 @@ class BaseExtractionAgent(ABC):
         logger.debug(f"Request cost: ₹{cost_inr:.4f}")
         return cost_inr
     
-    def _generate_gemma_response(self, prompt: str) -> Tuple[str, float]:
-        """Generate response using Gemma API"""
-        if not self.model:
-            raise ValueError("Gemma model not available")
+    def _track_cost_with_tokens(self, input_tokens: int, output_tokens: int) -> float:
+        """Track API usage cost with actual token counts from OpenAI"""
+        
+        cost_inr = (
+            (input_tokens / 1000) * self.cost_per_1k_input_tokens +
+            (output_tokens / 1000) * self.cost_per_1k_output_tokens
+        )
+        
+        self.total_cost += cost_inr
+        self.request_count += 1
+        
+        logger.debug(f"Cost tracking: {input_tokens} input + {output_tokens} output tokens = ₹{cost_inr:.4f}")
+        
+        return cost_inr
+    
+    def _generate_openai_response(self, prompt: str) -> Tuple[str, float]:
+        """Generate response using OpenAI API"""
+        if not self.client:
+            raise ValueError("OpenAI client not available")
         
         try:
-            response = self.model.generate_content(
-                prompt,
-                generation_config=genai.types.GenerationConfig(
-                    temperature=0.1,
-                    max_output_tokens=2000,
-                    top_p=0.8
-                )
+            # Create messages
+            messages = create_chat_messages(prompt)
+            
+            # Call OpenAI API
+            response = self.client.chat.completions.create(
+                model=self.model_name,
+                messages=messages,
+                temperature=0.1,
+                max_tokens=2000,
+                top_p=0.8
             )
             
-            output_text = response.text.strip()
-            cost = self._track_cost(prompt, output_text)
+            if not response or not response.choices or len(response.choices) == 0:
+                raise ValueError("Empty response from OpenAI")
+            
+            output_text = response.choices[0].message.content.strip()
+            
+            # Calculate cost using actual token usage
+            input_tokens = response.usage.prompt_tokens
+            output_tokens = response.usage.completion_tokens
+            cost = self._track_cost_with_tokens(input_tokens, output_tokens)
             
             return output_text, cost
             
         except Exception as e:
-            logger.error(f"Gemma API call failed: {str(e)}")
+            logger.error(f"OpenAI API call failed: {str(e)}")
             raise
     
     def _parse_json_response(self, response_text: str) -> Dict[str, Any]:
-        """Parse JSON response from Gemma"""
+        """Parse JSON response from OpenAI"""
         try:
             # Clean response text
             response_text = response_text.strip()
@@ -340,7 +364,7 @@ class BaseExtractionAgent(ABC):
             remarks=booking_dict.get('remarks', ''),
             labels=booking_dict.get('labels', ''),
             confidence_score=booking_dict.get('confidence_score', 0.8),
-            extraction_method=booking_dict.get('extraction_method', 'gemma_extraction')
+            extraction_method=booking_dict.get('extraction_method', 'openai_extraction')
         )
     
     def _normalize_address(self, address: str) -> str:

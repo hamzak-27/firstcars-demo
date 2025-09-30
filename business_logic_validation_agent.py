@@ -14,17 +14,16 @@ from typing import Dict, List, Optional, Any, Tuple
 from datetime import datetime, timedelta
 
 from base_extraction_agent import ExtractionResult
-from gemma_classification_agent import ClassificationResult
+from openai_classification_agent import ClassificationResult
 
 logger = logging.getLogger(__name__)
 
 try:
-    import google.generativeai as genai
-    from gemini_model_utils import create_gemini_model
-    GEMMA_AVAILABLE = True
+    from openai_model_utils import create_openai_client, create_chat_messages
+    OPENAI_AVAILABLE = True
 except ImportError:
-    GEMMA_AVAILABLE = False
-    logger.warning("Google Generative AI not available. Install with: pip install google-generativeai")
+    OPENAI_AVAILABLE = False
+    logger.warning("OpenAI utilities not available. Install with: pip install openai")
 
 class BusinessLogicValidationAgent:
     """
@@ -60,33 +59,33 @@ class BusinessLogicValidationAgent:
     - Date consistency (end date = start date if not specified)
     """
     
-    def __init__(self, api_key: str = None, model_name: str = "models/gemini-2.5-flash"):
+    def __init__(self, api_key: str = None, model_name: str = "gpt-4o-mini"):
         """Initialize business logic validation agent"""
         
-        self.api_key = api_key or os.getenv('GEMINI_API_KEY') or os.getenv('GOOGLE_AI_API_KEY')
+        self.api_key = api_key or os.getenv('OPENAI_API_KEY')
         self.model_name = model_name
         
-        # Configure Gemini if available
-        if GEMMA_AVAILABLE and self.api_key and self.api_key != "test-key":
+        # Configure OpenAI if available
+        if OPENAI_AVAILABLE and self.api_key and self.api_key != "test-key":
             try:
-                self.model, actual_model_name = create_gemini_model(self.api_key, model_name)
-                if self.model:
-                    self.model_name = actual_model_name
-                    logger.info(f"Successfully configured Gemini model: {actual_model_name}")
+                self.client = create_openai_client(self.api_key)
+                if self.client:
+                    logger.info(f"Successfully configured OpenAI client with model: {self.model_name}")
                 else:
-                    logger.error(f"Failed to create any Gemini model: {actual_model_name}")
+                    logger.error(f"Failed to create OpenAI client")
+                    self.client = None
             except Exception as e:
-                logger.error(f"Error creating Gemini model: {e}")
-                self.model = None
+                logger.error(f"Error creating OpenAI client: {e}")
+                self.client = None
         else:
-            self.model = None
+            self.client = None
         
         # Business logic mappings
         self._initialize_business_rules()
         
-        # Cost tracking
-        self.cost_per_1k_input_tokens = 0.05
-        self.cost_per_1k_output_tokens = 0.15
+        # Cost tracking (OpenAI GPT-4o-mini pricing in INR)
+        self.cost_per_1k_input_tokens = 0.0125  # ₹0.0125 per 1K input tokens
+        self.cost_per_1k_output_tokens = 0.05   # ₹0.05 per 1K output tokens
         self.total_cost = 0.0
         self.request_count = 0
         
@@ -319,7 +318,7 @@ class BusinessLogicValidationAgent:
         """Validate and enhance a single booking row"""
         
         # STEP 1: Try AI-based comprehensive validation first (with safer error handling)
-        if self.model:
+        if self.client:
             try:
                 df = self._ai_comprehensive_validation_safe(df, row_idx, original_content)
                 logger.info(f"AI comprehensive validation completed successfully for row {row_idx}")
@@ -651,7 +650,7 @@ class BusinessLogicValidationAgent:
     def _comprehensive_booking_validation(self, df: pd.DataFrame, row_idx: int, original_content: str) -> pd.DataFrame:
         """Comprehensive validation of all booking fields with AI assistance"""
         
-        if not self.model:
+        if not self.client:
             logger.warning("No AI model available for comprehensive validation - using rule-based fallback")
             return self._rule_based_comprehensive_validation(df, row_idx, original_content)
         
@@ -755,23 +754,20 @@ class BusinessLogicValidationAgent:
 
 Return ONLY the JSON object with corrected values."""
             
-            response = self.model.generate_content(
-                validation_prompt,
-                generation_config=genai.types.GenerationConfig(
-                    temperature=0.1,
-                    max_output_tokens=800,
-                    top_p=0.8
-                ),
-                safety_settings={
-                    genai.types.HarmCategory.HARM_CATEGORY_HARASSMENT: genai.types.HarmBlockThreshold.BLOCK_NONE,
-                    genai.types.HarmCategory.HARM_CATEGORY_HATE_SPEECH: genai.types.HarmBlockThreshold.BLOCK_NONE,
-                    genai.types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: genai.types.HarmBlockThreshold.BLOCK_NONE,
-                    genai.types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: genai.types.HarmBlockThreshold.BLOCK_NONE,
-                }
+            # Create OpenAI messages
+            messages = create_chat_messages(validation_prompt)
+            
+            # Call OpenAI API
+            response = self.client.chat.completions.create(
+                model=self.model_name,
+                messages=messages,
+                temperature=0.1,
+                max_tokens=800,
+                top_p=0.8
             )
             
-            if response and hasattr(response, 'text') and response.text:
-                response_text = response.text.strip()
+            if response and response.choices and len(response.choices) > 0:
+                response_text = response.choices[0].message.content.strip()
                 
                 # Parse JSON response
                 try:
@@ -816,7 +812,9 @@ Return ONLY the JSON object with corrected values."""
                             df.iloc[row_idx, df.columns.get_loc('Duty Type')] = validated_data['duty_type']
                         
                         # Track cost
-                        self._track_cost(validation_prompt, response_text)
+                        input_tokens = response.usage.prompt_tokens
+                        output_tokens = response.usage.completion_tokens
+                        self._track_cost_with_tokens(input_tokens, output_tokens)
                         
                         logger.info(f"Comprehensive AI validation completed for row {row_idx}")
                         
@@ -831,51 +829,35 @@ Return ONLY the JSON object with corrected values."""
         return df
     
     def _ai_comprehensive_validation_safe(self, df: pd.DataFrame, row_idx: int, original_content: str) -> pd.DataFrame:
-        """Safer AI-powered comprehensive validation with error handling for safety filters"""
+        """Safer AI-powered comprehensive validation with error handling"""
         
-        if not self.model:
-            raise Exception("No AI model available")
+        if not self.client:
+            raise Exception("No AI client available")
         
         # Get current booking data for context
         current_booking = self._extract_current_booking_data(df, row_idx)
         
-        # Create a safer, more business-focused prompt to avoid safety filter triggers
+        # Create a safer, more business-focused prompt
         safe_prompt = self._create_safe_business_validation_prompt(original_content, current_booking)
         
         try:
-            # Use more conservative generation settings
-            response = self.model.generate_content(
-                safe_prompt,
-                generation_config=genai.types.GenerationConfig(
-                    temperature=0.1,  # Very low temperature for consistency
-                    max_output_tokens=1000,
-                    top_p=0.8,
-                    candidate_count=1
-                ),
-                safety_settings={
-                    genai.types.HarmCategory.HARM_CATEGORY_HARASSMENT: genai.types.HarmBlockThreshold.BLOCK_NONE,
-                    genai.types.HarmCategory.HARM_CATEGORY_HATE_SPEECH: genai.types.HarmBlockThreshold.BLOCK_NONE,
-                    genai.types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: genai.types.HarmBlockThreshold.BLOCK_NONE,
-                    genai.types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: genai.types.HarmBlockThreshold.BLOCK_NONE,
-                }
+            # Create OpenAI messages
+            messages = create_chat_messages(safe_prompt)
+            
+            # Call OpenAI API with conservative settings
+            response = self.client.chat.completions.create(
+                model=self.model_name,
+                messages=messages,
+                temperature=0.1,  # Very low temperature for consistency
+                max_tokens=1000,
+                top_p=0.8
             )
             
-            # Check if response was blocked by safety filters
-            if hasattr(response, 'prompt_feedback') and response.prompt_feedback:
-                if hasattr(response.prompt_feedback, 'block_reason'):
-                    logger.warning(f"AI response blocked by safety filters: {response.prompt_feedback.block_reason}")
-                    raise Exception(f"Safety filter blocked response: {response.prompt_feedback.block_reason}")
-            
             # Check if we got a valid response
-            if not response or not hasattr(response, 'text') or not response.text:
-                if hasattr(response, 'candidates') and response.candidates:
-                    if hasattr(response.candidates[0], 'finish_reason'):
-                        logger.warning(f"AI generation stopped with reason: {response.candidates[0].finish_reason}")
-                        if response.candidates[0].finish_reason == 2:  # SAFETY
-                            raise Exception("Response blocked by safety filters (finish_reason=2)")
+            if not response or not response.choices or len(response.choices) == 0:
                 raise Exception("Empty response from AI model")
             
-            response_text = response.text.strip()
+            response_text = response.choices[0].message.content.strip()
             
             # Parse JSON response
             try:
@@ -894,8 +876,10 @@ Return ONLY the JSON object with corrected values."""
                 # Apply AI validation results to DataFrame
                 df = self._apply_ai_validation_results(df, row_idx, validation_result)
                 
-                # Track cost
-                self._track_cost(safe_prompt, response_text)
+                # Track cost with token usage
+                input_tokens = response.usage.prompt_tokens
+                output_tokens = response.usage.completion_tokens
+                self._track_cost_with_tokens(input_tokens, output_tokens)
                 
                 logger.info(f"AI comprehensive validation completed successfully for row {row_idx}")
                 return df
@@ -1237,7 +1221,7 @@ Provide clean data in JSON:
     def _extract_extra_information(self, df: pd.DataFrame, row_idx: int, original_content: str) -> str:
         """Extract extra information using AI or fallback to rules"""
         
-        if self.model:
+        if self.client:
             try:
                 return self._extract_remarks_with_ai(original_content, df, row_idx)
             except Exception as e:
@@ -1272,26 +1256,25 @@ Original email:
 Return only additional details that would be useful for the driver or operations team. If no additional details, return empty string."""
         
         try:
-            response = self.model.generate_content(
-                prompt,
-                generation_config=genai.types.GenerationConfig(
-                    temperature=0.1,
-                    max_output_tokens=500,
-                    top_p=0.8
-                ),
-                safety_settings={
-                    genai.types.HarmCategory.HARM_CATEGORY_HARASSMENT: genai.types.HarmBlockThreshold.BLOCK_NONE,
-                    genai.types.HarmCategory.HARM_CATEGORY_HATE_SPEECH: genai.types.HarmBlockThreshold.BLOCK_NONE,
-                    genai.types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: genai.types.HarmBlockThreshold.BLOCK_NONE,
-                    genai.types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: genai.types.HarmBlockThreshold.BLOCK_NONE,
-                }
+            # Create OpenAI messages
+            messages = create_chat_messages(prompt)
+            
+            # Call OpenAI API
+            response = self.client.chat.completions.create(
+                model=self.model_name,
+                messages=messages,
+                temperature=0.1,
+                max_tokens=500,
+                top_p=0.8
             )
             
-            if response and hasattr(response, 'text') and response.text:
-                remarks = response.text.strip()
+            if response and response.choices and len(response.choices) > 0:
+                remarks = response.choices[0].message.content.strip()
                 
-                # Track cost
-                self._track_cost(prompt, remarks)
+                # Track cost with token usage
+                input_tokens = response.usage.prompt_tokens
+                output_tokens = response.usage.completion_tokens
+                self._track_cost_with_tokens(input_tokens, output_tokens)
                 
                 return remarks
             else:
@@ -1353,7 +1336,7 @@ Return only additional details that would be useful for the driver or operations
         return ""
     
     def _track_cost(self, input_text: str, output_text: str) -> float:
-        """Track API usage cost"""
+        """Track API usage cost (fallback method for estimated tokens)"""
         input_tokens = len(input_text) // 4
         output_tokens = len(output_text) // 4
         
@@ -1364,6 +1347,21 @@ Return only additional details that would be useful for the driver or operations
         
         self.total_cost += cost_inr
         self.request_count += 1
+        
+        return cost_inr
+    
+    def _track_cost_with_tokens(self, input_tokens: int, output_tokens: int) -> float:
+        """Track API usage cost with actual token counts from OpenAI"""
+        
+        cost_inr = (
+            (input_tokens / 1000) * self.cost_per_1k_input_tokens +
+            (output_tokens / 1000) * self.cost_per_1k_output_tokens
+        )
+        
+        self.total_cost += cost_inr
+        self.request_count += 1
+        
+        logger.debug(f"Cost tracking: {input_tokens} input + {output_tokens} output tokens = ₹{cost_inr:.4f}")
         
         return cost_inr
     
@@ -1454,7 +1452,7 @@ def test_business_logic_validation():
     )
     
     # Create mock classification result
-    from gemma_classification_agent import BookingType, DutyType, ClassificationResult
+    from openai_classification_agent import BookingType, DutyType, ClassificationResult
     classification_result = ClassificationResult(
         booking_type=BookingType.MULTIPLE,
         booking_count=3,

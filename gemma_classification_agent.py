@@ -1,6 +1,14 @@
 #!/usr/bin/env python3
 """
-Enhanced Gemma Classification Agent for Car Rental Bookings
+⚠️  DEPRECATED - This file has been replaced by OpenAI-based agents
+
+MIGRATION NOTICE:
+- This Gemini-based agent is no longer maintained
+- Use openai_classification_agent.py instead
+- See DEPRECATED_GEMINI_MIGRATION.md for full migration guide
+- Cost reduction: ~70% savings with OpenAI GPT-4o-mini
+
+Enhanced Gemma Classification Agent for Car Rental Bookings (DEPRECATED)
 Determines single vs multiple bookings based on specific business rules
 """
 
@@ -159,8 +167,6 @@ Return JSON:
     "reasoning": "brief explanation",
     "detected_duty_type": "drop|disposal|outstation|unknown"
 }}"""
-        "has_multiple_drops_per_day": true|false
-    }},
     
     "business_rule_applied": "single_multi_day_8_80|single_outstation|single_drop_4_40|multiple_drops_same_day|multiple_alternate_days|multiple_vehicle_changes",
     

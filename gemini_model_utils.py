@@ -1,6 +1,14 @@
 #!/usr/bin/env python3
 """
-Gemini Model Discovery and Management Utilities
+⚠️  DEPRECATED - This file has been replaced by OpenAI-based utilities
+
+MIGRATION NOTICE:
+- This Gemini utility module is no longer maintained
+- Use openai_model_utils.py instead
+- See DEPRECATED_GEMINI_MIGRATION.md for full migration guide
+- OpenAI provides better cost tracking and reliability
+
+Gemini Model Discovery and Management Utilities (DEPRECATED)
 Automatically discovers available models and provides fallback options
 """
 
