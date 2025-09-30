@@ -53,6 +53,21 @@ You should see:
 🚀 **AI VALIDATION READY FOR DEPLOYMENT!**
 ```
 
+### 🛡️ Safety Filter Issues?
+
+If you encounter Gemini safety filter blocks (finish_reason=2), test the enhanced bypass:
+```bash
+python test_safety_bypass.py
+```
+
+The code now includes **enhanced safety settings** that bypass most restrictions:
+- `HARM_CATEGORY_HARASSMENT: BLOCK_NONE`
+- `HARM_CATEGORY_HATE_SPEECH: BLOCK_NONE` 
+- `HARM_CATEGORY_SEXUALLY_EXPLICIT: BLOCK_NONE`
+- `HARM_CATEGORY_DANGEROUS_CONTENT: BLOCK_NONE`
+
+These settings are applied to all AI calls in both classification and validation agents.
+
 ## 🎯 What AI Validation Provides
 
 ### **1. Smart Classification**
