@@ -840,10 +840,15 @@ class BusinessLogicValidationAgent:
     def _apply_final_post_processing(self, df: pd.DataFrame, row_idx: int) -> pd.DataFrame:
         """Apply final post-processing rules: Corporate/Booked By = NA, address handling"""
         
-        # Set Corporate and Booked By columns to NA (always)
-        if 'Corporate' in df.columns:
+        # Set Corporate and Booked By columns to NA (always) - add columns if they don't exist
+        if 'Corporate' not in df.columns:
+            df['Corporate'] = 'NA'
+        else:
             df.iloc[row_idx, df.columns.get_loc('Corporate')] = 'NA'
-        if 'Booked By' in df.columns:
+            
+        if 'Booked By' not in df.columns:
+            df['Booked By'] = 'NA'
+        else:
             df.iloc[row_idx, df.columns.get_loc('Booked By')] = 'NA'
         
         # Set drop address handling (only reporting address)
@@ -1098,12 +1103,6 @@ Return ONLY the JSON object with corrected values."""
                     # Apply post-processing: detect and handle round trips
                     df = self._detect_and_handle_round_trips(df, row_idx, original_content)
                     
-                    # Set Corporate and Booked By columns to NA (always)
-                    if 'Corporate' in df.columns:
-                        df.iloc[row_idx, df.columns.get_loc('Corporate')] = 'NA'
-                    if 'Booked By' in df.columns:
-                        df.iloc[row_idx, df.columns.get_loc('Booked By')] = 'NA'
-                    
                     # Set drop address handling (only reporting address)
                     if 'Drop Address' in df.columns:
                         reporting_addr = str(df.iloc[row_idx].get('Reporting Address', '')).strip()
@@ -1126,6 +1125,17 @@ Return ONLY the JSON object with corrected values."""
         except Exception as e:
             logger.error(f"AI comprehensive validation failed: {e}")
             return self._rule_based_comprehensive_validation(df, row_idx, original_content)
+        
+        # Set Corporate and Booked By columns to NA (always) - add columns if they don't exist
+        if 'Corporate' not in df.columns:
+            df['Corporate'] = 'NA'
+        else:
+            df.iloc[row_idx, df.columns.get_loc('Corporate')] = 'NA'
+            
+        if 'Booked By' not in df.columns:
+            df['Booked By'] = 'NA'
+        else:
+            df.iloc[row_idx, df.columns.get_loc('Booked By')] = 'NA'
         
         return df
     

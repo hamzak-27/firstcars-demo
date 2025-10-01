@@ -6,6 +6,7 @@ Handles complex table layouts with multiple bookings in vertical and horizontal 
 import logging
 import json
 import re
+import pandas as pd
 from typing import Dict, List, Optional, Any, Tuple
 from dataclasses import asdict
 
@@ -127,9 +128,23 @@ class EnhancedMultiBookingProcessor(EnhancedFormProcessor):
             if not extracted_data:
                 return self._create_error_result("Could not extract structured data from document", filename)
             
-            # Step 2: Apply Textract corrections and detect table layout  
-            corrected_data = self._apply_textract_corrections(extracted_data)
-            bookings = self._extract_multiple_bookings_from_tables(corrected_data)
+            # Step 1.5: Check for form structure and apply form extraction if detected
+            raw_text = extracted_data.get('raw_text', '')
+            if self._is_form_document(raw_text):
+                logger.info(f"Form document detected, applying form extraction for: {filename}")
+                form_booking = self._extract_single_booking_from_form(extracted_data)
+                if form_booking:
+                    bookings = [form_booking]
+                    logger.info(f"Successfully extracted single booking from form structure")
+                else:
+                    logger.warning("Form extraction failed, falling back to table extraction")
+                    # Continue with table extraction as fallback
+                    corrected_data = self._apply_textract_corrections(extracted_data)
+                    bookings = self._extract_multiple_bookings_from_tables(corrected_data)
+            else:
+                # Step 2: Apply Textract corrections and detect table layout for multi-booking tables
+                corrected_data = self._apply_textract_corrections(extracted_data)
+                bookings = self._extract_multiple_bookings_from_tables(corrected_data)
             
             if not bookings:
                 # Fallback to single booking extraction
@@ -137,37 +152,61 @@ class EnhancedMultiBookingProcessor(EnhancedFormProcessor):
                 result = self.email_processor.process_email(formatted_text)
                 bookings = result.bookings
             
-            # Step 3: Apply enhanced duty type detection to each booking (without OpenAI)
+            # Step 3: Apply BusinessLogicValidationAgent for comprehensive validation
             try:
-                from enhanced_duty_type_detector import EnhancedDutyTypeDetector
-                duty_detector = EnhancedDutyTypeDetector()
+                # Convert bookings to DataFrame for validation
+                validation_df = self._convert_bookings_to_dataframe(bookings)
                 
-                for booking in bookings:
-                    # Create a mock result for duty type detection
-                    from structured_email_agent import StructuredExtractionResult
-                    mock_result = StructuredExtractionResult(
-                        bookings=[booking],
-                        total_bookings_found=1,
-                        extraction_method="multi_booking_processing",
-                        confidence_score=0.8,
-                        processing_notes=""
+                if not validation_df.empty:
+                    # Create extraction result for validation
+                    from base_extraction_agent import ExtractionResult
+                    extraction_result = ExtractionResult(
+                        success=True,
+                        bookings_dataframe=validation_df,
+                        booking_count=len(bookings),
+                        confidence_score=0.85,
+                        processing_time=1.0,
+                        cost_inr=0.0,
+                        extraction_method="enhanced_multi_booking"
                     )
                     
-                    # Add structured data to booking for duty type detection
-                    if not booking.additional_info:
-                        booking.additional_info = ""
-                    booking.additional_info += f"\\nStructured Data: {json.dumps(extracted_data, indent=2)}"
+                    # Create mock classification result 
+                    from openai_classification_agent import ClassificationResult, BookingType, DutyType
+                    classification_result = ClassificationResult(
+                        booking_type=BookingType.SINGLE if len(bookings) == 1 else BookingType.MULTIPLE,
+                        booking_count=len(bookings),
+                        confidence_score=0.9,
+                        reasoning=f"Table extraction found {len(bookings)} booking(s)",
+                        detected_duty_type=DutyType.DISPOSAL_8_80,  # Default, will be corrected by validation
+                        detected_dates=[],
+                        detected_vehicles=[],
+                        detected_drops=[]
+                    )
                     
-                    # Use enhanced duty type detection (no OpenAI required)
-                    duty_result = duty_detector.detect_duty_type_from_structured_data(mock_result, "")
-                    if duty_result:
-                        booking.duty_type = duty_result['duty_type']
-                        booking.duty_type_reasoning = duty_result['reasoning']
-                        booking.confidence_score = duty_result['confidence']
-                
-                logger.info(f"Enhanced duty type detection applied to {len(bookings)} bookings")
+                    # Apply comprehensive business logic validation
+                    from business_logic_validation_agent import BusinessLogicValidationAgent
+                    validator = BusinessLogicValidationAgent()
+                    
+                    validated_result = validator.validate_and_enhance(
+                        extraction_result, classification_result, raw_text
+                    )
+                    
+                    if validated_result.success:
+                        # Convert validated DataFrame back to bookings
+                        validated_bookings = self._convert_dataframe_to_bookings(validated_result.bookings_dataframe)
+                        if validated_bookings:
+                            bookings = validated_bookings
+                            logger.info(f"BusinessLogicValidationAgent applied successfully to {len(bookings)} bookings")
+                        else:
+                            logger.warning("DataFrame to bookings conversion failed, using original bookings")
+                    else:
+                        logger.warning(f"Business logic validation failed: {validated_result.error_message}")
+                else:
+                    logger.warning("Empty DataFrame, skipping business logic validation")
+                    
             except Exception as e:
-                logger.warning(f"Enhanced duty type detection failed: {str(e)}")
+                logger.warning(f"Business logic validation failed: {str(e)}")
+                # Continue with original bookings if validation fails
             
             # Step 4: Create result
             from structured_email_agent import StructuredExtractionResult
@@ -225,6 +264,205 @@ class EnhancedMultiBookingProcessor(EnhancedFormProcessor):
                     bookings.append(booking)
         
         logger.info(f"Extracted {len(bookings)} bookings from tables")
+        return bookings
+    
+    def _is_form_document(self, raw_text: str) -> bool:
+        """Detect if the document is a form structure (like Medtronic form)"""
+        if not raw_text:
+            return False
+        
+        # Import our form extraction utilities
+        try:
+            from form_extraction_utils import FormExtractionUtils
+            form_utils = FormExtractionUtils()
+            return form_utils.detect_form_structure(raw_text)
+        except ImportError:
+            logger.warning("FormExtractionUtils not available")
+            # Fallback form detection logic
+            form_indicators = [
+                'company name',
+                'name of the user', 
+                'email id of booker',
+                'city in which car is required',
+                'reporting time',
+                'type of duty',
+                'employee name',
+                'contact number'
+            ]
+            
+            text_lower = raw_text.lower()
+            indicator_count = sum(1 for indicator in form_indicators if indicator in text_lower)
+            return indicator_count >= 3
+    
+    def _extract_single_booking_from_form(self, extracted_data: Dict[str, Any]) -> 'BookingExtraction':
+        """Extract a single booking from form structure using FormExtractionUtils"""
+        
+        try:
+            from form_extraction_utils import FormExtractionUtils
+            from structured_email_agent import BookingExtraction
+            
+            # Initialize form extractor
+            form_utils = FormExtractionUtils()
+            
+            # Extract form data from raw text
+            raw_text = extracted_data.get('raw_text', '')
+            form_data = form_utils.extract_form_data(raw_text)
+            
+            if not form_data:
+                logger.warning("No form data extracted from raw text")
+                return None
+            
+            # Convert form data to BookingExtraction object
+            booking = BookingExtraction()
+            
+            # Map form data to booking fields
+            booking.customer = form_data.get('Customer', '')
+            booking.booked_by_name = form_data.get('Booked By Name', '')
+            booking.booked_by_phone = form_data.get('Booked By Phone Number', '')
+            booking.booked_by_email = form_data.get('Booked By Email', '')
+            booking.passenger_name = form_data.get('Passenger Name', '')
+            booking.passenger_phone = form_data.get('Passenger Phone Number', '')
+            booking.passenger_email = form_data.get('Passenger Email', '')
+            booking.from_location = form_data.get('From (Service Location)', '')
+            booking.to_location = form_data.get('To', '')
+            booking.vehicle_group = form_data.get('Vehicle Group', '')
+            booking.duty_type = form_data.get('Duty Type', '')
+            booking.start_date = form_data.get('Start Date', '')
+            booking.end_date = form_data.get('End Date', '')
+            booking.reporting_time = form_data.get('Rep. Time', '')
+            booking.reporting_address = form_data.get('Reporting Address', '')
+            booking.drop_address = form_data.get('Drop Address', '')
+            booking.flight_train_number = form_data.get('Flight/Train Number', '')
+            booking.dispatch_center = form_data.get('Dispatch center', '')
+            booking.remarks = form_data.get('Remarks', '')
+            booking.labels = form_data.get('Labels', '')
+            
+            # Set extraction metadata
+            booking.confidence_score = 0.85  # High confidence for form extraction
+            booking.extraction_method = "form_extraction"
+            booking.additional_info = "Extracted using FormExtractionUtils"
+            
+            # Apply post-processing from form utils
+            processed_data = form_utils._post_process_form_data(form_data)
+            
+            # Update booking with post-processed data
+            for field_name, value in processed_data.items():
+                if hasattr(booking, field_name.lower().replace(' ', '_').replace('(', '').replace(')', '')):
+                    attr_name = field_name.lower().replace(' ', '_').replace('(', '').replace(')', '')
+                    if attr_name == 'from_service_location':
+                        attr_name = 'from_location'
+                    elif attr_name == 'rep_time':
+                        attr_name = 'reporting_time'
+                    elif attr_name == 'passenger_phone_number':
+                        attr_name = 'passenger_phone'
+                    elif attr_name == 'booked_by_phone_number':
+                        attr_name = 'booked_by_phone'
+                    elif attr_name == 'booked_by_name':
+                        attr_name = 'booked_by_name'
+                    elif attr_name == 'booked_by_email':
+                        attr_name = 'booked_by_email'
+                    
+                    if hasattr(booking, attr_name):
+                        setattr(booking, attr_name, value)
+            
+            logger.info(f"Form booking extracted: {booking.passenger_name} - {booking.customer}")
+            return booking
+            
+        except ImportError:
+            logger.error("FormExtractionUtils not available, cannot extract form data")
+            return None
+        except Exception as e:
+            logger.error(f"Form extraction failed: {str(e)}")
+            return None
+    
+    def _convert_bookings_to_dataframe(self, bookings: List['BookingExtraction']) -> 'pd.DataFrame':
+        """Convert list of BookingExtraction objects to DataFrame for validation"""
+        import pandas as pd
+        
+        if not bookings:
+            return pd.DataFrame()
+        
+        # Standard columns for validation
+        standard_columns = [
+            'Customer', 'Booked By Name', 'Booked By Phone Number', 'Booked By Email',
+            'Passenger Name', 'Passenger Phone Number', 'Passenger Email',
+            'From (Service Location)', 'To', 'Vehicle Group', 'Duty Type',
+            'Start Date', 'End Date', 'Rep. Time', 'Reporting Address', 'Drop Address',
+            'Flight/Train Number', 'Dispatch center', 'Remarks', 'Labels'
+        ]
+        
+        # Convert bookings to rows
+        rows = []
+        for booking in bookings:
+            row = {
+                'Customer': getattr(booking, 'customer', '') or getattr(booking, 'corporate', '') or '',
+                'Booked By Name': getattr(booking, 'booked_by_name', '') or '',
+                'Booked By Phone Number': getattr(booking, 'booked_by_phone', '') or '',
+                'Booked By Email': getattr(booking, 'booked_by_email', '') or '',
+                'Passenger Name': getattr(booking, 'passenger_name', '') or '',
+                'Passenger Phone Number': getattr(booking, 'passenger_phone', '') or '',
+                'Passenger Email': getattr(booking, 'passenger_email', '') or '',
+                'From (Service Location)': getattr(booking, 'from_location', '') or '',
+                'To': getattr(booking, 'to_location', '') or '',
+                'Vehicle Group': getattr(booking, 'vehicle_group', '') or '',
+                'Duty Type': getattr(booking, 'duty_type', '') or '',
+                'Start Date': getattr(booking, 'start_date', '') or '',
+                'End Date': getattr(booking, 'end_date', '') or '',
+                'Rep. Time': getattr(booking, 'reporting_time', '') or '',
+                'Reporting Address': getattr(booking, 'reporting_address', '') or '',
+                'Drop Address': getattr(booking, 'drop_address', '') or '',
+                'Flight/Train Number': getattr(booking, 'flight_train_number', '') or '',
+                'Dispatch center': getattr(booking, 'dispatch_center', '') or '',
+                'Remarks': getattr(booking, 'remarks', '') or '',
+                'Labels': getattr(booking, 'labels', '') or ''
+            }
+            rows.append(row)
+        
+        df = pd.DataFrame(rows, columns=standard_columns)
+        logger.info(f"Converted {len(bookings)} bookings to DataFrame with shape {df.shape}")
+        return df
+    
+    def _convert_dataframe_to_bookings(self, df: 'pd.DataFrame') -> List['BookingExtraction']:
+        """Convert validated DataFrame back to BookingExtraction objects"""
+        from structured_email_agent import BookingExtraction
+        
+        if df.empty:
+            return []
+        
+        bookings = []
+        for idx, row in df.iterrows():
+            booking = BookingExtraction()
+            
+            # Map DataFrame columns back to booking attributes
+            booking.customer = row.get('Customer', '')
+            booking.corporate = row.get('Customer', '')  # Map customer to corporate as well
+            booking.booked_by_name = row.get('Booked By Name', '')
+            booking.booked_by_phone = row.get('Booked By Phone Number', '')
+            booking.booked_by_email = row.get('Booked By Email', '')
+            booking.passenger_name = row.get('Passenger Name', '')
+            booking.passenger_phone = row.get('Passenger Phone Number', '')
+            booking.passenger_email = row.get('Passenger Email', '')
+            booking.from_location = row.get('From (Service Location)', '')
+            booking.to_location = row.get('To', '')
+            booking.vehicle_group = row.get('Vehicle Group', '')
+            booking.duty_type = row.get('Duty Type', '')
+            booking.start_date = row.get('Start Date', '')
+            booking.end_date = row.get('End Date', '')
+            booking.reporting_time = row.get('Rep. Time', '')
+            booking.reporting_address = row.get('Reporting Address', '')
+            booking.drop_address = row.get('Drop Address', '')
+            booking.flight_train_number = row.get('Flight/Train Number', '')
+            booking.dispatch_center = row.get('Dispatch center', '')
+            booking.remarks = row.get('Remarks', '')
+            booking.labels = row.get('Labels', '')
+            
+            # Set metadata
+            booking.confidence_score = 0.9  # High confidence after validation
+            booking.extraction_method = "enhanced_multi_booking_validated"
+            
+            bookings.append(booking)
+        
+        logger.info(f"Converted DataFrame back to {len(bookings)} validated bookings")
         return bookings
     
     def _apply_textract_corrections(self, extracted_data: Dict[str, Any]) -> Dict[str, Any]:
