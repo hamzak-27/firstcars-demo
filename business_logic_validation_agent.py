@@ -375,82 +375,217 @@ class BusinessLogicValidationAgent:
         return df
     
     def _enhance_duty_type(self, df: pd.DataFrame, row_idx: int, original_content: str) -> pd.DataFrame:
-        """Enhance duty type using existing business logic"""
+        """Enhanced duty type calculation with comprehensive business logic
+        
+        DUTY TYPE CALCULATION RULES:
+        ============================
+        
+        STEP 1: CORPORATE CATEGORY DETECTION (G2G vs P2P)
+        - Check Corporate.csv database for exact company name matches
+        - Use email domain analysis for known corporates  
+        - G2G = Government/Corporate-to-Government (pre-approved corporates)
+        - P2P = Person-to-Person (individual bookings or non-listed corporates)
+        
+        STEP 2: SERVICE TYPE DETECTION
+        - DROP (04HR 40KMS): Airport transfers, single drops, one-way trips
+        - DISPOSAL (08HR 80KMS): Local usage, at disposal, whole day, city usage
+        - OUTSTATION: Different cities, intercity travel
+        
+        STEP 3: DISTANCE CALCULATION (Outstation only)
+        - Major cities (Mumbai, Pune, Chennai, Delhi, Bangalore, Hyderabad, Ahmedabad): 250KMS
+        - Kolkata or other cities: 300KMS
+        
+        STEP 4: FINAL FORMAT
+        - G2G-04HR 40KMS (Corporate Drop)
+        - G2G-08HR 80KMS (Corporate Disposal)  
+        - G2G-Outstation 250KMS (Corporate Outstation Major Cities)
+        - G2G-Outstation 300KMS (Corporate Outstation Kolkata/Others)
+        - P2P-04HR 40KMS (Personal Drop)
+        - P2P-08HR 80KMS (Personal Disposal)
+        - P2P-Outstation 250KMS (Personal Outstation Major Cities)
+        - P2P-Outstation 300KMS (Personal Outstation Kolkata/Others)
+        """
         
         current_duty = str(df.iloc[row_idx]['Duty Type']).strip()
         
         # If duty type is already properly formatted, keep it
         if re.match(r'^(P2P|G2G)-(04HR 40KMS|08HR 80KMS|Outstation \d+KMS)$', current_duty):
+            logger.info(f"Duty type already properly formatted: {current_duty}")
             return df
         
-        # Detect duty type from content
-        detected_type = self._detect_duty_type_from_content(original_content, df, row_idx)
-        
-        # Detect corporate category
+        # STEP 1: Detect corporate category (G2G vs P2P)
         corporate_category = self._detect_corporate_category(original_content, df, row_idx)
         
-        # Map to package format
-        if detected_type == 'drop':
+        # STEP 2: Detect service type from content and locations
+        service_type = self._detect_service_type_comprehensive(original_content, df, row_idx)
+        
+        # STEP 3: Map service type to package format
+        if service_type == 'drop':
             package = "04HR 40KMS"
-        elif detected_type == 'outstation':
-            # Calculate outstation distance if possible
+        elif service_type == 'outstation':
+            # Calculate outstation distance based on cities
             from_city = str(df.iloc[row_idx]['From (Service Location)']).strip()
             to_city = str(df.iloc[row_idx]['To']).strip()
-            distance = self._estimate_outstation_distance(from_city, to_city)
+            distance = self._calculate_outstation_distance(from_city, to_city)
             package = f"Outstation {distance}KMS"
-        else:  # disposal/local
+        else:  # disposal/local (default)
             package = "08HR 80KMS"
         
-        # Set enhanced duty type
+        # STEP 4: Create final duty type format
         enhanced_duty_type = f"{corporate_category}-{package}"
         df.iloc[row_idx, df.columns.get_loc('Duty Type')] = enhanced_duty_type
         
+        logger.info(f"Enhanced duty type: Corporate={corporate_category}, Service={service_type}, Final={enhanced_duty_type}")
+        
         return df
     
-    def _detect_duty_type_from_content(self, content: str, df: pd.DataFrame, row_idx: int) -> str:
-        """Detect duty type from content using existing patterns"""
+    def _detect_service_type_comprehensive(self, content: str, df: pd.DataFrame, row_idx: int) -> str:
+        """Comprehensive service type detection with improved logic"""
         
         content_lower = content.lower()
         
-        # Check current booking data for clues
+        # Get location and remarks data
         from_loc = str(df.iloc[row_idx]['From (Service Location)']).lower()
         to_loc = str(df.iloc[row_idx]['To']).lower()
         remarks = str(df.iloc[row_idx]['Remarks']).lower()
         
-        # Check for outstation indicators (different cities)
-        if from_loc and to_loc and from_loc != to_loc:
-            from_city = self._extract_city_name(from_loc)
-            to_city = self._extract_city_name(to_loc)
-            if from_city != to_city:
+        # Extract city names for outstation detection
+        from_city = self._extract_city_name(from_loc) if from_loc and from_loc != 'nan' else ''
+        to_city = self._extract_city_name(to_loc) if to_loc and to_loc != 'nan' else ''
+        
+        # Priority 1: Check for explicit drop/airport keywords
+        drop_keywords = [
+            'drop', 'airport transfer', 'airport pickup', 'airport drop',
+            'pickup from airport', 'drop to airport', 'one way', 'single trip',
+            'transfer only', 'point to point'
+        ]
+        
+        if any(keyword in content_lower or keyword in remarks for keyword in drop_keywords):
+            return 'drop'
+        
+        # Priority 2: Check for outstation indicators
+        outstation_keywords = [
+            'outstation', 'out station', 'intercity', 'different city',
+            'round trip', 'return journey', 'travel'
+        ]
+        
+        # Check explicit outstation keywords
+        if any(keyword in content_lower or keyword in remarks for keyword in outstation_keywords):
+            return 'outstation'
+        
+        # Check if from and to cities are different (and both exist)
+        if from_city and to_city and from_city != to_city:
+            # Verify they are actually different cities, not same city with different areas
+            standardized_from = self.city_mappings.get(from_city, from_city)
+            standardized_to = self.city_mappings.get(to_city, to_city)
+            
+            if standardized_from.lower() != standardized_to.lower():
+                logger.info(f"Outstation detected: {standardized_from} != {standardized_to}")
                 return 'outstation'
         
-        # Check content patterns
-        for duty_type, patterns in self.duty_type_patterns.items():
-            if any(pattern in content_lower or pattern in remarks for pattern in patterns):
-                return duty_type
+        # Priority 3: Check for disposal/local keywords  
+        disposal_keywords = [
+            'disposal', 'at disposal', 'local use', 'local', 'city use',
+            'whole day', 'full day', 'visit', 'multiple stops',
+            'use as per guest instructions', 'as per requirement'
+        ]
         
-        # Default to disposal for local usage
+        if any(keyword in content_lower or keyword in remarks for keyword in disposal_keywords):
+            return 'disposal'
+        
+        # Default logic based on location patterns
+        if from_loc and to_loc:
+            # If both locations are in same city/area, likely disposal
+            if from_city == to_city or not to_city:
+                return 'disposal'
+            else:
+                return 'outstation'
+        elif from_loc and not to_loc:
+            # Only from location, likely disposal (local usage)
+            return 'disposal'
+        
+        # Final default
         return 'disposal'
     
+    def _calculate_outstation_distance(self, from_city: str, to_city: str) -> int:
+        """Calculate outstation distance based on city classifications"""
+        
+        # Clean and standardize city names
+        from_clean = self._extract_city_name(from_city.lower()) if from_city else ''
+        to_clean = self._extract_city_name(to_city.lower()) if to_city else ''
+        
+        # Major cities get 250KMS
+        major_cities = {
+            'mumbai', 'pune', 'chennai', 'delhi', 'bangalore', 'bengaluru',
+            'hyderabad', 'ahmedabad', 'gurgaon', 'gurugram', 'noida'
+        }
+        
+        # Check if destination is a major city
+        if to_clean in major_cities:
+            logger.info(f"Major city outstation: {to_clean} -> 250KMS")
+            return 250
+        elif 'kolkata' in to_clean or 'calcutta' in to_clean:
+            logger.info(f"Kolkata outstation: {to_clean} -> 300KMS")
+            return 300
+        else:
+            # Other cities get 300KMS
+            logger.info(f"Other city outstation: {to_clean} -> 300KMS")
+            return 300
+    
+    def _detect_duty_type_from_content(self, content: str, df: pd.DataFrame, row_idx: int) -> str:
+        """Legacy method - redirects to comprehensive detection"""
+        return self._detect_service_type_comprehensive(content, df, row_idx)
+    
     def _detect_corporate_category(self, content: str, df: pd.DataFrame, row_idx: int) -> str:
-        """Detect G2G vs P2P corporate category"""
+        """Detect G2G vs P2P corporate category using Corporate CSV database"""
         
         content_lower = content.lower()
         customer = str(df.iloc[row_idx]['Customer']).lower()
         
-        # Check for known corporate patterns
-        for pattern, info in self.corporate_patterns.items():
-            if pattern in content_lower or pattern in customer:
-                return info['category']
+        # Get booked by email for domain analysis
+        booked_by_email = str(df.iloc[row_idx]['Booked By Email']).lower()
+        passenger_email = str(df.iloc[row_idx]['Passenger Email']).lower()
         
-        # Check for corporate email patterns
-        booked_by_email = str(df.iloc[row_idx]['Booked By Email'])
-        passenger_email = str(df.iloc[row_idx]['Passenger Email'])
+        # Step 1: Direct corporate name lookup in CSV database
+        for corp_key, corp_info in self.corporate_mappings.items():
+            corp_name = corp_info.get('name', '').lower()
+            
+            # Check if corporate name appears in content or customer field
+            if corp_key in content_lower or corp_key in customer:
+                category = corp_info.get('category', 'P2P')
+                logger.info(f"Found corporate match: {corp_info.get('name')} -> {category}")
+                return category
+            
+            # Also check exact corporate name match
+            if corp_name in content_lower or corp_name in customer:
+                category = corp_info.get('category', 'P2P')
+                logger.info(f"Found corporate name match: {corp_info.get('name')} -> {category}")
+                return category
         
-        if any('@' in email and not any(domain in email.lower() for domain in ['gmail', 'yahoo', 'hotmail']) 
+        # Step 2: Email domain-based detection for known corporates
+        if '@' in booked_by_email or '@' in passenger_email:
+            for email in [booked_by_email, passenger_email]:
+                if '@' in email:
+                    domain = email.split('@')[1] if '@' in email else ''
+                    domain_name = domain.split('.')[0] if '.' in domain else domain
+                    
+                    # Check if domain matches any corporate
+                    for corp_key, corp_info in self.corporate_mappings.items():
+                        corp_name_parts = corp_info.get('name', '').lower().split()
+                        if domain_name and any(domain_name in part or part in domain_name for part in corp_name_parts if len(part) > 3):
+                            category = corp_info.get('category', 'P2P')
+                            logger.info(f"Found corporate via email domain: {corp_info.get('name')} -> {category}")
+                            return category
+        
+        # Step 3: Fallback logic - corporate email vs personal email
+        personal_domains = ['gmail', 'yahoo', 'hotmail', 'outlook', 'rediffmail', 'ymail']
+        
+        if any('@' in email and not any(domain in email.lower() for domain in personal_domains) 
                for email in [booked_by_email, passenger_email]):
+            logger.info("Corporate email domain detected, defaulting to G2G")
             return 'G2G'  # Corporate email domain
         
+        logger.info("No corporate match found, defaulting to P2P")
         return 'P2P'  # Default to P2P (Person to Person)
     
     def _estimate_outstation_distance(self, from_city: str, to_city: str) -> int:
