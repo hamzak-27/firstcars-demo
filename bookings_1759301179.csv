@@ -1,0 +1,43 @@
+Customer,Booked By Name,Booked By Phone Number,Booked By Email,Passenger Name,Passenger Phone Number,Passenger Email,From (Service Location),To,Vehicle Group,Duty Type,Start Date,End Date,Rep. Time,Reporting Address,Drop Address,Flight/Train Number,Dispatch center,Remarks,Labels
+Is the booking for IMPL employee or SPR (Docter),Travel Coordinator,,,N/A,N/A,N/A,N/A,N/A,Swift Dzire,G2G-08HR 80KMS,N/A,N/A,09:00,,,,Central Dispatch,"Extracted from TABLE EXTRACTION RESULTS - Booking 1. - Company: Is the booking for IMPL employee or SPR (Docter)
+- Company: If SPR booking- mention E-Cat's Agreement No. (mandatory)
+- Company: If SPR booking- mention Division (mandatory)",
+If SPR booking- mention E-Cat's Agreement No. (mandatory),Travel Coordinator,,,N/A,N/A,N/A,N/A,N/A,Swift Dzire,G2G-08HR 80KMS,N/A,N/A,09:00,,,,Central Dispatch,"Extracted from TABLE EXTRACTION RESULTS - Booking 2. - Booking 1: Company: Is the booking for IMPL employee or SPR (Docter)
+- Booking 2: Company: If SPR booking- mention E-Cat's Agreement No. (mandatory)
+- Booking 3: Company: If SPR booking- mention Division (mandatory)",
+If SPR booking- mention Division (mandatory),Travel Coordinator,,,N/A,N/A,N/A,N/A,N/A,Swift Dzire,G2G-08HR 80KMS,N/A,N/A,09:00,,,,Central Dispatch,"Extracted from TABLE EXTRACTION RESULTS - Booking 3. - Company: Is the booking for IMPL employee or SPR (Docter)
+- Company: If SPR booking- mention E-Cat's Agreement No. (mandatory)
+- Company: If SPR booking- mention Division (mandatory)",
+Name & Contact Number of booker,Travel Coordinator,,,N/A,N/A,N/A,N/A,N/A,Swift Dzire,G2G-08HR 80KMS,N/A,N/A,09:00,,,,Central Dispatch,"Extracted from TABLE EXTRACTION RESULTS - Booking 4. - Company: Is the booking for IMPL employee or SPR (Docter)
+- Company: If SPR booking- mention E-Cat's Agreement No. (mandatory)
+- Company: If SPR booking- mention Division (mandatory)",
+Email ID of booker,Travel Coordinator,,,N/A,N/A,N/A,N/A,N/A,Swift Dzire,G2G-08HR 80KMS,N/A,N/A,09:00,,,,Central Dispatch,"Extracted from TABLE EXTRACTION RESULTS - Booking 5. - Company: Is the booking for IMPL employee or SPR (Docter)
+- Company: If SPR booking- mention E-Cat's Agreement No. (mandatory)
+- Company: If SPR booking- mention Division (mandatory)",
+City in which car is required,Travel Coordinator,,,N/A,N/A,N/A,N/A,N/A,Swift Dzire,G2G-08HR 80KMS,N/A,N/A,09:00,,,,Central Dispatch,"Extracted from TABLE EXTRACTION RESULTS - Booking 6. - Booking 1: Company: Is the booking for IMPL employee or SPR (Docter)
+- Booking 2: Company: If SPR booking- mention E-Cat's Agreement No. (mandatory)
+- Booking 3: Company: If SPR booking- mention Division (mandatory)",
+Name of the User,Travel Coordinator,,,N/A,N/A,N/A,N/A,N/A,Swift Dzire,G2G-08HR 80KMS,N/A,N/A,09:00,,,,Central Dispatch,"Extracted from TABLE EXTRACTION RESULTS - Booking 7. - Company: Is the booking for IMPL employee or SPR (Docter)
+- Company: If SPR booking- mention E-Cat's Agreement No. (mandatory)
+- Company: If SPR booking- mention Division (mandatory)",
+Mobile No. of the User,Travel Coordinator,,,N/A,N/A,N/A,N/A,N/A,Swift Dzire,G2G-08HR 80KMS,N/A,N/A,09:00,,,,Central Dispatch,"Extracted from TABLE EXTRACTION RESULTS - Booking 8. - Company: Is the booking for IMPL employee or SPR (Docter)
+- Company: If SPR booking- mention E-Cat's Agreement No. (mandatory)
+- Company: If SPR booking- mention Division (mandatory)",
+Email ID of user,Travel Coordinator,,,N/A,N/A,N/A,N/A,N/A,Swift Dzire,G2G-08HR 80KMS,N/A,N/A,09:00,,,,Central Dispatch,"Extracted from TABLE EXTRACTION RESULTS - Booking 9. - Booking 1: Is the booking for IMPL employee or SPR (Docter)
+- Booking 2: If SPR booking- mention E-Cat's Agreement No. (mandatory)
+- Booking 3: If SPR booking- mention Division (mandatory)",
+Date of Requirement- From date & To date for multi day,Travel Coordinator,,,N/A,N/A,N/A,N/A,N/A,Swift Dzire,G2G-08HR 80KMS,N/A,N/A,09:00,,,,Central Dispatch,"Extracted from TABLE EXTRACTION RESULTS - Booking 10. - Booking 1: Is the booking for IMPL employee or SPR (Docter)
+- Booking 2: If SPR booking- mention E-Cat's Agreement No. (mandatory)
+- Booking 3: If SPR booking- mention Division (mandatory)",
+1Car Type (Indigo/Dzire/Fiesta),Travel Coordinator,,,N/A,N/A,N/A,N/A,N/A,Swift Dzire,G2G-08HR 80KMS,N/A,N/A,09:00,,,,Central Dispatch,"Extracted from TABLE EXTRACTION RESULTS - Booking 11. - Booking 1: Is the booking for IMPL employee or SPR (Docter)
+- Booking 2: If SPR booking- mention E-Cat's Agreement No. (mandatory)
+- Booking 3: If SPR booking- mention Division (mandatory)",
+Reporting,Travel Coordinator,,,N/A,N/A,N/A,N/A,N/A,Swift Dzire,G2G-08HR 80KMS,N/A,N/A,09:00,,,,Central Dispatch,"Extracted from TABLE EXTRACTION RESULTS - Booking 12. - Booking 1: Is the booking for IMPL employee or SPR (Docter)
+- Booking 2: If SPR booking- mention E-Cat's Agreement No. (mandatory)
+- Booking 3: If SPR booking- mention Division (mandatory)",
+Reporting Time,Travel Coordinator,,,N/A,N/A,N/A,N/A,N/A,Swift Dzire,G2G-08HR 80KMS,N/A,N/A,09:00,,,,Central Dispatch,"Extracted from TABLE EXTRACTION RESULTS - Booking 13. - Company: Is the booking for IMPL employee or SPR (Docter)
+- Company: If SPR booking- mention E-Cat's Agreement No. (mandatory)
+- Company: If SPR booking- mention Division (mandatory)",
+Type of duty (Only Drop / Local full day,Travel Coordinator,,,N/A,N/A,N/A,N/A,N/A,Swift Dzire,G2G-08HR 80KMS,N/A,N/A,09:00,,,,Central Dispatch,"Extracted from TABLE EXTRACTION RESULTS - Booking 14. - Company: Is the booking for IMPL employee or SPR (Docter)
+- Company: If SPR booking- mention E-Cat's Agreement No. (mandatory)
+- Company: If SPR booking- mention Division (mandatory)",
