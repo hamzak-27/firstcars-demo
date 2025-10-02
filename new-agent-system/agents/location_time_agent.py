@@ -140,6 +140,12 @@ Extract only these 8 fields:
 - If visits/addresses mentioned for local/outstation duties, DO NOT put in drop_address
 - Those visit addresses should go to REMARKS column instead
 
+⚠️ **AIRPORT DROP SPECIAL HANDLING:**
+- "Apt Drop" or "Airport Drop" → drop_address: "Airport"
+- "Railway Station Drop" → drop_address: "Railway Station"
+- If duty type mentions "Apt Drop", "Airport Drop", or similar → Use "Airport" as drop_address
+- For specific airport terminals (T1, T2, etc.), include terminal info: "Airport T2"
+
 **TABLE PROCESSING:**
 - Look for "City", "Date of Travel", "Pick-up Time", "Pick-up Address", "Drop at" rows/columns
 - Extract from appropriate cell based on booking number

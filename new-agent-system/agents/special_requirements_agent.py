@@ -140,22 +140,30 @@ Extract only these 10 fields:
 **LABELS EXTRACTION LOGIC:**
 
 **ONLY 3 LABELS ARE USED:**
-1. **LadyGuest** - Use ONLY if "Ms." or "Mrs." is mentioned in passenger information
+1. **LadyGuest** - Use ONLY if "Ms." or "Mrs." is mentioned in PASSENGER information
 2. **VIP** - Use ONLY if booker explicitly specifies passenger is VIP
 3. **MD's Guest" - Ignore for now (not to be extracted)
 
-**CRITICAL LABEL RULES:**
-- **LadyGuest**: Check passenger names ONLY for "Ms." or "Mrs." titles
-- **NEVER assign LadyGuest** for "Mr." titles - "Mr." passengers are NOT lady guests
+**CRITICAL LABEL RULES - PASSENGER FOCUS ONLY:**
+⚠️ **IMPORTANT: Labels are based on PASSENGER details, NOT booker details!**
+
+- **LadyGuest**: Check PASSENGER names ONLY for "Ms." or "Mrs." titles
+- **IGNORE booker gender** - Even if booker is "Ms. Renuka", if passenger is "SRIRAM M" (male), NO LadyGuest label
+- **NEVER assign LadyGuest** for "Mr." passengers - "Mr." passengers are NOT lady guests
 - Look for explicit VIP mentions: "VIP guest", "VIP passenger", "VIP treatment"
 - Multiple labels can be applied (comma-separated)
 - If no labels apply, return null
 
-**GENDER TITLE HANDLING:**
-- "Mr." → NO LadyGuest label (male passenger)
-- "Ms." → LadyGuest label (female passenger)
-- "Mrs." → LadyGuest label (female passenger)
-- No title → No gender-based label
+**GENDER TITLE HANDLING FOR PASSENGERS:**
+- Passenger: "Mr. John" → NO LadyGuest label (male passenger)
+- Passenger: "Ms. Mary" → LadyGuest label (female passenger)
+- Passenger: "Mrs. Sarah" → LadyGuest label (female passenger)
+- Passenger: "SRIRAM M" (no title) → No gender-based label
+
+**EXAMPLE SCENARIOS:**
+- Booker: "Ms. Renuka", Passenger: "SRIRAM M" → labels: null (passenger is male)
+- Booker: "Mr. John", Passenger: "Ms. Mary" → labels: "LadyGuest" (passenger is female)
+- Booker: "Ms. Sarah", Passenger: "Mrs. Lisa" → labels: "LadyGuest" (passenger is female)
 
 **SPECIAL INSTRUCTIONS:**
 - Rates should be numeric only (remove currency symbols)
