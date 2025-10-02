@@ -340,75 +340,75 @@ Sarah""",
                 st.header("🔄 Processing Results")
                 
                 try:
-                        # Save uploaded file temporarily with proper binary mode
-                        with tempfile.NamedTemporaryFile(delete=False, suffix=f".{uploaded_file.name.split('.')[-1]}", mode='wb') as tmp_file:
-                            # Reset uploaded file position and read bytes
-                            uploaded_file.seek(0)
-                            file_bytes = uploaded_file.getvalue()  # Use getvalue() for Streamlit UploadedFile
-                            tmp_file.write(file_bytes)
-                            temp_path = tmp_file.name
-                            
-                            # Debug: Log file size to verify it's saved correctly
-                            logger.info(f"Saved uploaded file to {temp_path}, original size: {len(file_bytes)} bytes")
+                    # Save uploaded file temporarily with proper binary mode
+                    with tempfile.NamedTemporaryFile(delete=False, suffix=f".{uploaded_file.name.split('.')[-1]}", mode='wb') as tmp_file:
+                        # Reset uploaded file position and read bytes
+                        uploaded_file.seek(0)
+                        file_bytes = uploaded_file.getvalue()  # Use getvalue() for Streamlit UploadedFile
+                        tmp_file.write(file_bytes)
+                        temp_path = tmp_file.name
                         
-                        # Verify the saved file size
-                        saved_file_size = os.path.getsize(temp_path)
-                        logger.info(f"Verified saved file size: {saved_file_size} bytes")
+                        # Debug: Log file size to verify it's saved correctly
+                        logger.info(f"Saved uploaded file to {temp_path}, original size: {len(file_bytes)} bytes")
+                    
+                    # Verify the saved file size
+                    saved_file_size = os.path.getsize(temp_path)
+                    logger.info(f"Verified saved file size: {saved_file_size} bytes")
+                    
+                    if saved_file_size < 100:
+                        st.error(f"❌ File save error: Saved file is only {saved_file_size} bytes (likely corrupted)")
+                        os.unlink(temp_path)  # Clean up corrupted file
+                        return
+                    
+                    # Process with agent simulation
+                    result_df = simulate_agent_processing(
+                        system, 
+                        image_path=temp_path, 
+                        sender_email=sender_email
+                    )
+                    
+                    # Clean up temporary file
+                    os.unlink(temp_path)
+                    
+                    if not result_df.empty:
+                        st.header("📊 Extracted Booking Data")
+                        st.success(f"✅ Successfully extracted **{len(result_df)}** booking(s) from table")
                         
-                        if saved_file_size < 100:
-                            st.error(f"❌ File save error: Saved file is only {saved_file_size} bytes (likely corrupted)")
-                            os.unlink(temp_path)  # Clean up corrupted file
-                            return
-                        
-                        # Process with agent simulation
-                        result_df = simulate_agent_processing(
-                            system, 
-                            image_path=temp_path, 
-                            sender_email=sender_email
+                        # Display the DataFrame
+                        st.dataframe(
+                            result_df,
+                            width='stretch',
+                            height=min(400, len(result_df) * 50 + 100)
                         )
                         
-                        # Clean up temporary file
-                        os.unlink(temp_path)
+                        # Download button
+                        csv = result_df.to_csv(index=False)
+                        st.download_button(
+                            label="📥 Download Results as CSV",
+                            data=csv,
+                            file_name=f"table_extraction_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                            mime="text/csv"
+                        )
                         
-                        if not result_df.empty:
-                            st.header("📊 Extracted Booking Data")
-                            st.success(f"✅ Successfully extracted **{len(result_df)}** booking(s) from table")
-                            
-                            # Display the DataFrame
-                            st.dataframe(
-                                result_df,
-                                width='stretch',
-                                height=min(400, len(result_df) * 50 + 100)
-                            )
-                            
-                            # Download button
-                            csv = result_df.to_csv(index=False)
-                            st.download_button(
-                                label="📥 Download Results as CSV",
-                                data=csv,
-                                file_name=f"table_extraction_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                                mime="text/csv"
-                            )
-                            
-                            # Show summary
-                            with st.expander("📈 Extraction Summary"):
-                                col_a, col_b, col_c = st.columns(3)
-                                with col_a:
-                                    st.metric("Total Bookings", len(result_df))
-                                with col_b:
-                                    non_na_fields = (result_df != "NA").sum().sum()
-                                    total_fields = len(result_df) * len(result_df.columns)
-                                    st.metric("Fields Extracted", f"{non_na_fields}/{total_fields}")
-                                with col_c:
-                                    extraction_rate = (non_na_fields / total_fields) * 100
-                                    st.metric("Extraction Rate", f"{extraction_rate:.1f}%")
-                        
-                        else:
-                            st.warning("⚠️ No booking data could be extracted from the table image.")
+                        # Show summary
+                        with st.expander("📈 Extraction Summary"):
+                            col_a, col_b, col_c = st.columns(3)
+                            with col_a:
+                                st.metric("Total Bookings", len(result_df))
+                            with col_b:
+                                non_na_fields = (result_df != "NA").sum().sum()
+                                total_fields = len(result_df) * len(result_df.columns)
+                                st.metric("Fields Extracted", f"{non_na_fields}/{total_fields}")
+                            with col_c:
+                                extraction_rate = (non_na_fields / total_fields) * 100
+                                st.metric("Extraction Rate", f"{extraction_rate:.1f}%")
                     
-                    except Exception as e:
-                        st.error(f"❌ Table processing failed: {str(e)}")
-                        logger.error(f"Table processing error: {e}")
+                    else:
+                        st.warning("⚠️ No booking data could be extracted from the table image.")
+                
+                except Exception as e:
+                    st.error(f"❌ Table processing failed: {str(e)}")
+                    logger.error(f"Table processing error: {e}")
     
     # Footer
     st.markdown("---")
