@@ -22,18 +22,18 @@ class CorporateBookerAgent(BaseAgent):
         self.corporate_df = self._load_corporate_csv()
     
     def _load_corporate_csv(self) -> pd.DataFrame:
-        """Load Corporate (1).csv file for company validation"""
+        """Load Corporate (1).csv file for company validation (optional)"""
         try:
             csv_path = "../Corporate (1).csv"  # Relative to new-agent-system directory
             if os.path.exists(csv_path):
                 df = pd.read_csv(csv_path)
-                logger.info(f"Loaded corporate CSV with {len(df)} companies")
+                logger.info(f"✅ Loaded corporate CSV with {len(df)} companies")
                 return df
             else:
-                logger.warning(f"Corporate CSV not found at {csv_path}")
+                logger.info(f"ℹ️ Corporate CSV not found at {csv_path} - will extract booker details when clearly mentioned")
                 return pd.DataFrame()
         except Exception as e:
-            logger.error(f"Error loading corporate CSV: {e}")
+            logger.info(f"ℹ️ Could not load corporate CSV: {e} - will extract booker details when clearly mentioned")
             return pd.DataFrame()
     
     def get_target_fields(self) -> List[str]:
@@ -104,18 +104,27 @@ Regards, Ganesan K"
 {corporate_lookup}
 
 **STEP 2: BOOKER EXTRACTION LOGIC**
-⚠️ **CONDITIONAL EXTRACTION:** Extract booker details ONLY if:
-1. Company is found in the corporate database AND
-2. The company's "Booker involved or direct" column says "involved"
+⚠️ **CRITICAL: ONLY EXTRACT BOOKER WHEN CLEARLY MENTIONED:**
 
-If company not in database OR says "direct": Set all booker fields to null
+**EXTRACT BOOKER DETAILS ONLY IF:**
+1. There are explicit booker fields like "Name of the booker", "Booked by", "Booking agent"
+2. OR the content clearly mentions someone booking on behalf of someone else
+3. OR email signatures indicate a travel coordinator/assistant booking for others
 
-**BOOKER IDENTIFICATION (when applicable):**
-- Person who is making/coordinating the booking request
-- May be different from the passenger
-- Look for signatures, "Regards", "From", "Booked by"
-- Travel coordinators, admins, assistants
-- Check email sender information
+**DO NOT EXTRACT BOOKER IF:**
+- Only passenger/customer details are mentioned
+- No clear indication of a separate booking person
+- Content suggests self-booking (person booking for themselves)
+- Ambiguous cases where it's unclear who is the booker vs passenger
+
+**DEFAULT BEHAVIOR: Set all booker fields to null unless CLEARLY mentioned**
+
+**BOOKER IDENTIFICATION (when clearly applicable):**
+- Person who is explicitly making/coordinating the booking request
+- Different from the passenger/traveler
+- Look for explicit fields: "Booker Name", "Booked by", "Booking Coordinator"
+- Travel coordinators, admins, assistants (when explicitly mentioned)
+- Check for clear booking role indicators
 
 **TABLE PROCESSING:**
 - **Form Tables**: Look for Field-Value pairs in booking forms

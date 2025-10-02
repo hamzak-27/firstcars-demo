@@ -194,7 +194,7 @@ Return ONLY valid JSON, no additional text.
         
         try:
             response = self.client.chat.completions.create(
-                model="gpt-4o",
+                model="gpt-4o-mini",
                 messages=[
                     {"role": "system", "content": self.structured_system_prompt},
                     {"role": "user", "content": user_prompt}

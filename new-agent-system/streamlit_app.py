@@ -236,17 +236,14 @@ def main():
         horizontal=True
     )
     
-    # Input sections
-    col1, col2 = st.columns([2, 1])
-    
-    with col1:
-        if input_method == "📧 Unstructured Email Content":
-            st.subheader("📧 Email Content Input")
-            
-            email_content = st.text_area(
-                "Paste your email content here:",
-                height=300,
-                placeholder="""Subject: Car Service Request
+    # Main input section
+    if input_method == "📧 Unstructured Email Content":
+        st.subheader("📧 Email Content Input")
+        
+        email_content = st.text_area(
+            "Paste your email content here:",
+            height=300,
+            placeholder="""Subject: Car Service Request
 
 Hi,
 
@@ -261,88 +258,88 @@ Special requirements:
 
 Thanks,
 Sarah""",
-                help="Paste the complete email content including subject, body, and any special instructions"
-            )
+            help="Paste the complete email content including subject, body, and any special instructions"
+        )
+        
+        process_button = st.button("🚀 Process Email", type="primary")
+        
+        if process_button and email_content.strip():
+            st.header("🔄 Processing Results")
             
-            process_button = st.button("🚀 Process Email", type="primary")
+            try:
+                # Process with agent simulation
+                result_df = simulate_agent_processing(
+                    system, 
+                    email_content=email_content, 
+                    sender_email=sender_email
+                )
+                
+                if not result_df.empty:
+                    st.header("📊 Extracted Booking Data")
+                    st.success(f"✅ Successfully extracted **{len(result_df)}** booking(s)")
+                    
+                    # Display the DataFrame with proper formatting
+                    st.dataframe(
+                        result_df,
+                        width='stretch',
+                        height=min(400, len(result_df) * 50 + 100)
+                    )
+                    
+                    # Download button
+                    csv = result_df.to_csv(index=False)
+                    st.download_button(
+                        label="📥 Download Results as CSV",
+                        data=csv,
+                        file_name=f"booking_extraction_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                        mime="text/csv"
+                    )
+                    
+                    # Show summary statistics
+                    with st.expander("📈 Extraction Summary"):
+                        col_a, col_b, col_c = st.columns(3)
+                        with col_a:
+                            st.metric("Total Bookings", len(result_df))
+                        with col_b:
+                            non_na_fields = (result_df != "NA").sum().sum()
+                            total_fields = len(result_df) * len(result_df.columns)
+                            st.metric("Fields Extracted", f"{non_na_fields}/{total_fields}")
+                        with col_c:
+                            extraction_rate = (non_na_fields / total_fields) * 100
+                            st.metric("Extraction Rate", f"{extraction_rate:.1f}%")
+                
+                else:
+                    st.warning("⚠️ No booking data could be extracted from the email content.")
             
-            if process_button and email_content.strip():
+            except Exception as e:
+                st.error(f"❌ Processing failed: {str(e)}")
+                logger.error(f"Email processing error: {e}")
+        
+        elif process_button:
+            st.warning("⚠️ Please enter email content to process.")
+    
+    else:  # Table Image Upload
+        st.subheader("🖼️ Table Image Upload")
+        
+        uploaded_file = st.file_uploader(
+            "Upload your booking table image:",
+            type=['png', 'jpg', 'jpeg', 'pdf'],
+            help="Upload clear images of booking tables. Supports PNG, JPG, JPEG, and PDF formats."
+        )
+        
+        if uploaded_file is not None:
+            # Display uploaded image
+            if uploaded_file.type.startswith('image'):
+                image = Image.open(uploaded_file)
+                st.image(image, caption="Uploaded Table Image", width='stretch')
+            else:
+                st.info(f"📄 Uploaded PDF: {uploaded_file.name}")
+            
+            process_button = st.button("🚀 Process Table", type="primary")
+            
+            if process_button:
                 st.header("🔄 Processing Results")
                 
                 try:
-                    # Process with agent simulation
-                    result_df = simulate_agent_processing(
-                        system, 
-                        email_content=email_content, 
-                        sender_email=sender_email
-                    )
-                    
-                    if not result_df.empty:
-                        st.header("📊 Extracted Booking Data")
-                        st.success(f"✅ Successfully extracted **{len(result_df)}** booking(s)")
-                        
-                        # Display the DataFrame with proper formatting
-                        st.dataframe(
-                            result_df,
-                            width='stretch',
-                            height=min(400, len(result_df) * 50 + 100)
-                        )
-                        
-                        # Download button
-                        csv = result_df.to_csv(index=False)
-                        st.download_button(
-                            label="📥 Download Results as CSV",
-                            data=csv,
-                            file_name=f"booking_extraction_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                            mime="text/csv"
-                        )
-                        
-                        # Show summary statistics
-                        with st.expander("📈 Extraction Summary"):
-                            col_a, col_b, col_c = st.columns(3)
-                            with col_a:
-                                st.metric("Total Bookings", len(result_df))
-                            with col_b:
-                                non_na_fields = (result_df != "NA").sum().sum()
-                                total_fields = len(result_df) * len(result_df.columns)
-                                st.metric("Fields Extracted", f"{non_na_fields}/{total_fields}")
-                            with col_c:
-                                extraction_rate = (non_na_fields / total_fields) * 100
-                                st.metric("Extraction Rate", f"{extraction_rate:.1f}%")
-                    
-                    else:
-                        st.warning("⚠️ No booking data could be extracted from the email content.")
-                
-                except Exception as e:
-                    st.error(f"❌ Processing failed: {str(e)}")
-                    logger.error(f"Email processing error: {e}")
-            
-            elif process_button:
-                st.warning("⚠️ Please enter email content to process.")
-        
-        else:  # Table Image Upload
-            st.subheader("🖼️ Table Image Upload")
-            
-            uploaded_file = st.file_uploader(
-                "Upload your booking table image:",
-                type=['png', 'jpg', 'jpeg', 'pdf'],
-                help="Upload clear images of booking tables. Supports PNG, JPG, JPEG, and PDF formats."
-            )
-            
-            if uploaded_file is not None:
-                # Display uploaded image
-                if uploaded_file.type.startswith('image'):
-                    image = Image.open(uploaded_file)
-                    st.image(image, caption="Uploaded Table Image", width='stretch')
-                else:
-                    st.info(f"📄 Uploaded PDF: {uploaded_file.name}")
-                
-                process_button = st.button("🚀 Process Table", type="primary")
-                
-                if process_button:
-                    st.header("🔄 Processing Results")
-                    
-                    try:
                         # Save uploaded file temporarily with proper binary mode
                         with tempfile.NamedTemporaryFile(delete=False, suffix=f".{uploaded_file.name.split('.')[-1]}", mode='wb') as tmp_file:
                             # Reset uploaded file position and read bytes
@@ -412,37 +409,6 @@ Sarah""",
                     except Exception as e:
                         st.error(f"❌ Table processing failed: {str(e)}")
                         logger.error(f"Table processing error: {e}")
-    
-    with col2:
-        st.subheader("📋 Expected Output Format")
-        
-        # Show sample output structure
-        sample_columns = [
-            "Customer", "Booked By Name", "Passenger Name", 
-            "From (Service Location)", "To", "Vehicle Group",
-            "Duty Type", "Start Date", "Rep. Time", "Flight/Train Number",
-            "Remarks", "Labels"
-        ]
-        
-        sample_data = {
-            "Field": sample_columns[:5] + ["..."] + sample_columns[-2:],
-            "Example": [
-                "TechCorp", "Sarah Johnson", "Ms. Priya Sharma",
-                "Mumbai", "Mumbai", "...",
-                "Driver should speak English", "LadyGuest, VIP"
-            ]
-        }
-        
-        st.table(pd.DataFrame(sample_data))
-        
-        st.info("""
-        **📊 Output Features:**
-        - Fixed 20-column structure
-        - Multiple booking support
-        - NA for missing fields
-        - Standardized formatting
-        - CSV download ready
-        """)
     
     # Footer
     st.markdown("---")

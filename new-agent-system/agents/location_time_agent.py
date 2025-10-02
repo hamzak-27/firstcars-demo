@@ -22,18 +22,19 @@ class LocationTimeAgent(BaseAgent):
         self.city_df = self._load_city_csv()
     
     def _load_city_csv(self) -> pd.DataFrame:
-        """Load City(1).xlsx - Sheet1.csv file for city validation"""
+        """Load City(1).xlsx - Sheet1.csv file for city validation (optional)"""
         try:
-            csv_path = "../City(1).xlsx - Sheet1.csv"  # Relative to new-agent-system directory
+            # CSV is in parent directory relative to new-agent-system
+            csv_path = "../City(1).xlsx - Sheet1.csv"
             if os.path.exists(csv_path):
                 df = pd.read_csv(csv_path)
-                logger.info(f"Loaded city CSV with {len(df)} cities")
+                logger.info(f"✅ Loaded city CSV from {csv_path} with {len(df)} cities")
                 return df
             else:
-                logger.warning(f"City CSV not found at {csv_path}")
+                logger.info(f"ℹ️ City CSV not found at {csv_path} - continuing without city mapping")
                 return pd.DataFrame()
         except Exception as e:
-            logger.error(f"Error loading city CSV: {e}")
+            logger.info(f"ℹ️ Could not load city CSV: {e} - continuing without city mapping")
             return pd.DataFrame()
     
     def get_target_fields(self) -> List[str]:
@@ -113,10 +114,15 @@ Extract only these 8 fields:
 ⚠️ **15-MINUTE TIME INTERVALS MANDATORY:**
 - Round ALL times to nearest 15-minute intervals
 - Valid intervals: :00, :15, :30, :45
-- Examples: 2:23 PM → 2:30 PM, 2:37 PM → 2:30 PM, 2:38 PM → 2:45 PM
-- If time is exactly between intervals, round up
+- **ROUNDING RULES:**
+  - 0-7 minutes: round DOWN to :00 (e.g., 7:07 → 7:00, 7:10 → 7:00)
+  - 8-22 minutes: round to :15 (e.g., 7:12 → 7:15, 7:22 → 7:15)
+  - 23-37 minutes: round to :30 (e.g., 7:25 → 7:30, 7:37 → 7:30)
+  - 38-52 minutes: round to :45 (e.g., 7:40 → 7:45, 7:50 → 7:45)
+  - 53-59 minutes: round UP to next hour :00 (e.g., 7:55 → 8:00)
 - Convert to HH:MM 24-hour format AFTER rounding
-- Example: "2:37 PM" → round to "2:30 PM" → "14:30"
+- Examples: "7:10 AM" → round to "7:00 AM" → "07:00"
+- Examples: "2:37 PM" → round to "2:30 PM" → "14:30"
 
 **ADDRESS PROCESSING:**
 

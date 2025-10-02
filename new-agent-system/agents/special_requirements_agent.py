@@ -121,6 +121,7 @@ Extract only these 10 fields:
 **CRITICAL: NO INFORMATION SHOULD BE OMITTED**
 - Extract ALL extra information provided by the booker that doesn't fit into other fields
 - Include driver details, special instructions, preferences, requirements
+- **SPECIAL FOCUS**: Capture vague instructions like "As per instructions", "As per guest requirements", "As per client needs"
 - Copy and paste exact text without summarizing or changing
 - Examples of remarks content:
   - "Please ensure AC is working properly"
@@ -130,6 +131,10 @@ Extract only these 10 fields:
   - "Prefer experienced driver for outstation trip"
   - "Contact passenger 30 minutes before pickup"
   - "Vehicle should be clean and well-maintained"
+  - **"As per guest instructions & meetings"** 
+  - **"As per instructions"**
+  - **"As per client requirements"**
+  - **"Usage: As per Ashish's Instructions & meetings"**
   - Any other special instructions or requirements
 
 **LABELS EXTRACTION LOGIC:**
