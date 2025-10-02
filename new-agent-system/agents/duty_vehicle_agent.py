@@ -25,10 +25,11 @@ class DutyVehicleAgent(BaseAgent):
     def _load_corporate_csv(self) -> pd.DataFrame:
         """Load Corporate (1).csv file for G2G/P2P determination"""
         try:
-            csv_path = "../Corporate (1).csv"
+            # Use relative path from project root
+            csv_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "Corporate (1).csv")
             if os.path.exists(csv_path):
                 df = pd.read_csv(csv_path)
-                logger.info(f"Loaded corporate CSV with {len(df)} companies")
+                logger.info(f"✅ Loaded corporate CSV with {len(df)} companies")
                 return df
             else:
                 logger.warning(f"Corporate CSV not found at {csv_path}")
@@ -40,10 +41,11 @@ class DutyVehicleAgent(BaseAgent):
     def _load_vehicle_csv(self) -> pd.DataFrame:
         """Load Car.xlsx - Sheet1.csv file for vehicle mapping"""
         try:
-            csv_path = "../Car.xlsx - Sheet1.csv"
+            # Use relative path from project root
+            csv_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "Car.xlsx - Sheet1.csv")
             if os.path.exists(csv_path):
                 df = pd.read_csv(csv_path)
-                logger.info(f"Loaded vehicle CSV with {len(df)} vehicles")
+                logger.info(f"✅ Loaded vehicle CSV with {len(df)} vehicles")
                 return df
             else:
                 logger.warning(f"Vehicle CSV not found at {csv_path}")

@@ -140,15 +140,22 @@ Extract only these 10 fields:
 **LABELS EXTRACTION LOGIC:**
 
 **ONLY 3 LABELS ARE USED:**
-1. **LadyGuest** - Use ONLY if "Ms" or "Mrs" is mentioned in passenger information
+1. **LadyGuest** - Use ONLY if "Ms." or "Mrs." is mentioned in passenger information
 2. **VIP** - Use ONLY if booker explicitly specifies passenger is VIP
-3. **MD's Guest** - Ignore for now (not to be extracted)
+3. **MD's Guest" - Ignore for now (not to be extracted)
 
-**LABEL RULES:**
-- Check passenger names for "Ms." "Mrs." titles
+**CRITICAL LABEL RULES:**
+- **LadyGuest**: Check passenger names ONLY for "Ms." or "Mrs." titles
+- **NEVER assign LadyGuest** for "Mr." titles - "Mr." passengers are NOT lady guests
 - Look for explicit VIP mentions: "VIP guest", "VIP passenger", "VIP treatment"
 - Multiple labels can be applied (comma-separated)
 - If no labels apply, return null
+
+**GENDER TITLE HANDLING:**
+- "Mr." → NO LadyGuest label (male passenger)
+- "Ms." → LadyGuest label (female passenger)
+- "Mrs." → LadyGuest label (female passenger)
+- No title → No gender-based label
 
 **SPECIAL INSTRUCTIONS:**
 - Rates should be numeric only (remove currency symbols)

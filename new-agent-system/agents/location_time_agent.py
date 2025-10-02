@@ -22,19 +22,19 @@ class LocationTimeAgent(BaseAgent):
         self.city_df = self._load_city_csv()
     
     def _load_city_csv(self) -> pd.DataFrame:
-        """Load City(1).xlsx - Sheet1.csv file for city validation (optional)"""
+        """Load City(1).xlsx - Sheet1.csv file for city validation"""
         try:
-            # CSV is in parent directory relative to new-agent-system
-            csv_path = "../City(1).xlsx - Sheet1.csv"
+            # Use relative path from project root
+            csv_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "City(1).xlsx - Sheet1.csv")
             if os.path.exists(csv_path):
                 df = pd.read_csv(csv_path)
-                logger.info(f"✅ Loaded city CSV from {csv_path} with {len(df)} cities")
+                logger.info(f"✅ Loaded city CSV with {len(df)} cities")
                 return df
             else:
-                logger.info(f"ℹ️ City CSV not found at {csv_path} - continuing without city mapping")
+                logger.warning(f"City CSV not found at {csv_path}")
                 return pd.DataFrame()
         except Exception as e:
-            logger.info(f"ℹ️ Could not load city CSV: {e} - continuing without city mapping")
+            logger.error(f"Error loading city CSV: {e}")
             return pd.DataFrame()
     
     def get_target_fields(self) -> List[str]:
